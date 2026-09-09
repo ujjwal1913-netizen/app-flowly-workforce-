@@ -20,7 +20,9 @@ use actix_session::storage::RedisSessionStore;
 use actix_session::SessionMiddleware;
 use actix_web::cookie::Key;
 use actix_web::middleware::NormalizePath;
-use actix_web::{dev::Server, web, web::Data, App, HttpResponse, HttpServer, Responder};
+use actix_web::{
+  dev::Server, web, web::Data, App, HttpRequest, HttpResponse, HttpServer, Responder,
+};
 use anyhow::{Context, Error};
 use aws_sdk_s3::config::{Credentials, Region, SharedCredentialsProvider};
 use aws_sdk_s3::operation::create_bucket::CreateBucketError;
@@ -134,6 +136,11 @@ pub async fn run_actix_server(
   .await
   .unwrap();
 
+  let proxy_client = reqwest::Client::builder()
+    .timeout(Duration::from_secs(30))
+    .build()
+    .expect("Failed to build proxy reqwest client");
+
   let realtime_server_actor = Supervisor::start(|_| RealtimeServerActor(realtime_server));
   let mut server = HttpServer::new(move || {
     let app = App::new()
@@ -166,7 +173,12 @@ pub async fn run_actix_server(
       .service(data_import_scope())
       .service(access_request_scope())
       .service(sharing_scope())
+      .service(
+        web::scope("/gotrue")
+          .default_service(web::route().to(gotrue_proxy_handler)),
+      )
       .route("/health", web::get().to(health_check))
+      .route("/api/health", web::get().to(health_check))
       .app_data(Data::new(state.metrics.registry.clone()))
       .app_data(Data::new(state.metrics.request_metrics.clone()))
       .app_data(Data::new(state.metrics.realtime_metrics.clone()))
@@ -176,6 +188,7 @@ pub async fn run_actix_server(
       .app_data(Data::new(state.clone()))
       .app_data(Data::new(storage.clone()))
       .app_data(Data::new(state.published_collab_store.clone()))
+      .app_data(Data::new(proxy_client.clone()))
   });
 
   server = server.listen(listener)?;
@@ -587,3 +600,75 @@ fn actix_cors_scope() -> actix_cors::Cors {
     ])
     .max_age(3600)
 }
+
+async fn gotrue_proxy_handler(
+  req: HttpRequest,
+  body: web::Bytes,
+  state: Data<AppState>,
+  proxy_client: Data<reqwest::Client>,
+) -> impl Responder {
+  let gotrue_base = state.config.gotrue.base_url.trim_end_matches('/');
+  let path = req.uri().path();
+  let mut downstream_path = path.strip_prefix("/gotrue").unwrap_or(path);
+  if downstream_path.is_empty() {
+    downstream_path = "/";
+  }
+
+  let query = req
+    .uri()
+    .query()
+    .map(|q| format!("?{}", q))
+    .unwrap_or_default();
+  let target_url = format!("{}{}{}", gotrue_base, downstream_path, query);
+
+  let method = reqwest::Method::from_bytes(req.method().as_str().as_bytes())
+    .unwrap_or(reqwest::Method::GET);
+  let mut proxy_req = proxy_client.request(method, &target_url).body(body);
+
+  for (name, value) in req.headers() {
+    let name_str = name.as_str();
+    if name_str.eq_ignore_ascii_case("host") || name_str.eq_ignore_ascii_case("content-length") {
+      continue;
+    }
+    if let Ok(val_str) = value.to_str() {
+      proxy_req = proxy_req.header(name_str, val_str);
+    } else {
+      proxy_req = proxy_req.header(name_str, value.as_bytes());
+    }
+  }
+
+  match proxy_req.send().await {
+    Ok(resp) => {
+      let status = actix_web::http::StatusCode::from_u16(resp.status().as_u16())
+        .unwrap_or(actix_web::http::StatusCode::BAD_GATEWAY);
+      let mut builder = HttpResponse::build(status);
+      for (name, value) in resp.headers() {
+        let n = name.as_str();
+        if n.eq_ignore_ascii_case("transfer-encoding")
+          || n.eq_ignore_ascii_case("connection")
+          || n.eq_ignore_ascii_case("content-length")
+        {
+          continue;
+        }
+        if let (Ok(h_name), Ok(h_val)) = (
+          actix_web::http::header::HeaderName::from_bytes(n.as_bytes()),
+          actix_web::http::header::HeaderValue::from_bytes(value.as_bytes()),
+        ) {
+          builder.insert_header((h_name, h_val));
+        }
+      }
+      match resp.bytes().await {
+        Ok(bytes) => builder.body(bytes),
+        Err(e) => {
+          error!("Failed to read GoTrue response body: {:?}", e);
+          HttpResponse::BadGateway().body("Failed to read GoTrue response body")
+        },
+      }
+    },
+    Err(e) => {
+      error!("GoTrue proxy request error for {}: {:?}", target_url, e);
+      HttpResponse::BadGateway().body(format!("GoTrue proxy error: {}", e))
+    },
+  }
+}
+
