@@ -1,0 +1,61 @@
+import { Suspense } from 'react';
+
+import { useReadOnly } from '@/application/database-yjs';
+import { AppendBreadcrumb } from '@/application/types';
+import EditorSkeleton from '@/components/_shared/skeleton/EditorSkeleton';
+import TableSkeleton from '@/components/_shared/skeleton/TableSkeleton';
+import { DatabaseRowProperties, RowSubDocument } from '@/components/database/components/database-row';
+import { RowCommentList } from '@/components/database/components/database-row/comment';
+import DatabaseRowHeader from '@/components/database/components/header/DatabaseRowHeader';
+import { FeedMembersProvider } from '@/components/database/feed/FeedMembersContext';
+import { FeedRowReactions } from '@/components/database/feed/FeedRowReactions';
+import { useDatabaseRowHistoryHotkeys } from '@/components/database/hooks/useDatabaseRowHistoryHotkeys';
+import { cn } from '@/lib/utils';
+
+import { Separator } from '../ui/separator';
+
+export function DatabaseRow({ appendBreadcrumb, rowId }: { rowId: string; appendBreadcrumb?: AppendBreadcrumb }) {
+  const readOnly = useReadOnly();
+
+  useDatabaseRowHistoryHotkeys(rowId, { enabled: !readOnly });
+
+  return (
+    <div className={'flex w-full justify-center'}>
+      <div className={cn('relative flex w-[952px] min-w-0 max-w-full flex-col gap-4')}>
+        <DatabaseRowHeader appendBreadcrumb={appendBreadcrumb} rowId={rowId} />
+
+        <div className={'flex w-full flex-1 flex-col gap-4'}>
+          <Suspense fallback={<TableSkeleton columns={2} rows={4} />}>
+            <DatabaseRowProperties rowId={rowId} />
+          </Suspense>
+          <div className={'px-24 max-sm:px-6'}>
+            <Separator />
+          </div>
+
+          <Suspense
+            fallback={<div className={'px-24 py-4 text-center text-sm text-text-tertiary max-sm:px-6'}>...</div>}
+          >
+            <div className={'px-24 max-sm:px-6'}>
+              <FeedMembersProvider>
+                <FeedRowReactions rowId={rowId} testIdPrefix='detail' showAddReaction={false} />
+              </FeedMembersProvider>
+              <RowCommentList rowId={rowId} />
+            </div>
+          </Suspense>
+
+          <div className={'px-24 max-sm:px-6'}>
+            <Separator />
+          </div>
+
+          <Suspense fallback={<EditorSkeleton />}>
+            <div className={'min-h-[300px]'}>
+              <RowSubDocument rowId={rowId} />
+            </div>
+          </Suspense>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default DatabaseRow;
