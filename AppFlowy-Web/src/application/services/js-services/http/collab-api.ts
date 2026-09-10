@@ -1,3 +1,4 @@
+import { decompress as decompressZstd } from 'fzstd';
 import { toBase64 } from 'lib0/buffer';
 
 import { getOrCreateDeviceId } from '@/application/services/js-services/device-id';
@@ -135,7 +136,7 @@ async function decodeFullSyncResultPayload(
 
       return transformGzip(payload, 'decompress', signal);
     case collab.PayloadCompressionType.COMPRESSION_ZSTD:
-      throw new Error('Server returned a zstd full-sync result, but the Web client has no zstd decoder');
+      return decompressZstd(payload);
     default:
       throw new Error(`Unsupported full-sync result compression: ${compression}`);
   }

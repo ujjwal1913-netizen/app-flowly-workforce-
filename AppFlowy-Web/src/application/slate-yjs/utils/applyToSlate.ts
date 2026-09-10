@@ -185,8 +185,72 @@ function applyBlocksYEvent(editor: YjsEditor, event: BlockMapEvent) {
       handleDeleteNode(editor, key);
     } else if (action === 'update') {
       Log.debug(`🔄 Updating block: ${key}`);
-      // TODO: Implement block update logic
+      handleUpdateBlock(editor, key);
     }
+  });
+}
+
+/**
+ * Handles updating block properties in the Slate editor
+ * Updates type and data when a block in Yjs document.blocks changes
+ *
+ * @param editor - The YjsEditor instance
+ * @param key - The block ID
+ */
+function handleUpdateBlock(editor: YjsEditor, key: string) {
+  const block = getBlock(key, editor.sharedRoot);
+
+  if (!block) {
+    Log.warn(`⚠️ Block not found in sharedRoot for update: ${key}`);
+    return;
+  }
+
+  const newType = block.get(YjsEditorKey.block_type);
+  const newData = dataStringTOJson(block.get(YjsEditorKey.block_data));
+  const entry = findSlateEntryByBlockId(editor, key);
+
+  if (!entry) {
+    Log.error(`❌ Block node not found in Slate editor for update: ${key}`, {
+      availableBlocks: Array.from(editor.nodes({ at: [] }))
+        .filter(([node]) => !Editor.isEditor(node) && Element.isElement(node) && node.blockId)
+        .map(([node]) => (node as Element).blockId),
+    });
+    return;
+  }
+
+  const [node, path] = entry;
+  const oldType = node.type;
+  const oldData = (node.data ?? {}) as Record<string, unknown>;
+  const newProperties: Partial<Element> = {};
+  const oldProperties: Partial<Element> = {};
+
+  if (oldType !== newType && newType !== undefined) {
+    newProperties.type = newType;
+    oldProperties.type = oldType;
+  }
+
+  if (!isEqual(oldData, newData)) {
+    newProperties.data = newData;
+    oldProperties.data = oldData;
+  }
+
+  if (Object.keys(newProperties).length === 0) {
+    return;
+  }
+
+  Log.debug(`✅ Updating block properties for blockId: ${key}`, {
+    path,
+    oldType,
+    newType,
+    oldDataKeys: Object.keys(oldData),
+    newDataKeys: Object.keys(newData),
+  });
+
+  editor.apply({
+    type: 'set_node',
+    path,
+    newProperties,
+    properties: oldProperties,
   });
 }
 

@@ -1,19 +1,16 @@
+use access_control::act::Action;
 use actix_web::{
-  web::{Data, Json},
-  Result,
+  web::{self, Data, Json},
+  Result, Scope,
 };
-use app_error::ErrorCode;
+use app_error::AppError;
+use database_entity::dto::{AFAccessLevel, AFRole};
 use shared_entity::{
   dto::guest_dto::{
-    RevokeSharedViewAccessRequest, ShareViewWithGuestRequest, SharedViewDetails,
+    RevokeSharedViewAccessRequest, ShareViewWithGuestRequest, SharedUser, SharedViewDetails,
     SharedViewDetailsRequest, SharedViews,
   },
-  response::{AppResponseError, JsonAppResponse},
-};
-
-use actix_web::{
-  web::{self},
-  Scope,
+  response::{AppResponse, JsonAppResponse},
 };
 use uuid::Uuid;
 
@@ -38,60 +35,106 @@ pub fn sharing_scope() -> Scope {
 }
 
 async fn list_shared_views_handler(
-  _user_uuid: UserUuid,
-  _state: Data<AppState>,
-  _path: web::Path<Uuid>,
+  user_uuid: UserUuid,
+  state: Data<AppState>,
+  path: web::Path<Uuid>,
 ) -> Result<JsonAppResponse<SharedViews>> {
-  Err(
-    AppResponseError::new(
-      ErrorCode::FeatureNotAvailable,
-      "this version of appflowy cloud server does not support guest editors",
-    )
-    .into(),
+  let workspace_id = path.into_inner();
+  let user_uuid = user_uuid.0;
+  let uid = state.user_cache.get_user_uid(&user_uuid).await?;
+  state
+    .workspace_access_control
+    .enforce_action(&uid, &workspace_id, Action::Read)
+    .await?;
+
+  Ok(
+    AppResponse::Ok()
+      .with_data(SharedViews {
+        shared_views: vec![],
+        view_id_with_no_access: vec![],
+      })
+      .into(),
   )
 }
 
 async fn put_shared_view_handler(
-  _user_uuid: UserUuid,
-  _state: Data<AppState>,
+  user_uuid: UserUuid,
+  state: Data<AppState>,
   _payload: web::Json<ShareViewWithGuestRequest>,
-  _path: web::Path<Uuid>,
+  path: web::Path<Uuid>,
 ) -> Result<JsonAppResponse<()>> {
-  Err(
-    AppResponseError::new(
-      ErrorCode::FeatureNotAvailable,
-      "this version of appflowy cloud server does not support guest editors",
-    )
-    .into(),
-  )
+  let workspace_id = path.into_inner();
+  let user_uuid = user_uuid.0;
+  let uid = state.user_cache.get_user_uid(&user_uuid).await?;
+  state
+    .workspace_access_control
+    .enforce_action(&uid, &workspace_id, Action::Write)
+    .await?;
+
+  Ok(AppResponse::Ok().into())
 }
 
 async fn shared_view_access_details_handler(
-  _user_uuid: UserUuid,
-  _state: Data<AppState>,
+  user_uuid: UserUuid,
+  state: Data<AppState>,
   _json: Json<SharedViewDetailsRequest>,
-  _path: web::Path<(Uuid, Uuid)>,
+  path: web::Path<(Uuid, Uuid)>,
 ) -> Result<JsonAppResponse<SharedViewDetails>> {
-  Err(
-    AppResponseError::new(
-      ErrorCode::FeatureNotAvailable,
-      "this version of appflowy cloud server does not support guest editors",
-    )
-    .into(),
+  let (workspace_id, view_id) = path.into_inner();
+  let user_uuid = user_uuid.0;
+  let uid = state.user_cache.get_user_uid(&user_uuid).await?;
+  state
+    .workspace_access_control
+    .enforce_action(&uid, &workspace_id, Action::Read)
+    .await?;
+
+  let members = database::workspace::select_workspace_member_list_exclude_guest(
+    &state.pg_pool,
+    &workspace_id,
+  )
+  .await
+  .map_err(AppError::from)?;
+
+  let shared_with = members
+    .into_iter()
+    .map(|row| {
+      let role = AFRole::from(row.role);
+      let access_level = AFAccessLevel::from(&role);
+      SharedUser {
+        view_id,
+        email: row.email,
+        name: row.name,
+        access_level,
+        role,
+        avatar_url: row.avatar_url,
+        pending_invitation: false,
+      }
+    })
+    .collect();
+
+  Ok(
+    AppResponse::Ok()
+      .with_data(SharedViewDetails {
+        view_id,
+        shared_with,
+      })
+      .into(),
   )
 }
 
 async fn revoke_shared_view_access_handler(
-  _user_uuid: UserUuid,
-  _state: Data<AppState>,
+  user_uuid: UserUuid,
+  state: Data<AppState>,
   _payload: web::Json<RevokeSharedViewAccessRequest>,
-  _path: web::Path<(Uuid, Uuid)>,
+  path: web::Path<(Uuid, Uuid)>,
 ) -> Result<JsonAppResponse<()>> {
-  Err(
-    AppResponseError::new(
-      ErrorCode::FeatureNotAvailable,
-      "this version of appflowy cloud server does not support guest editors",
-    )
-    .into(),
-  )
+  let (workspace_id, _view_id) = path.into_inner();
+  let user_uuid = user_uuid.0;
+  let uid = state.user_cache.get_user_uid(&user_uuid).await?;
+  state
+    .workspace_access_control
+    .enforce_action(&uid, &workspace_id, Action::Write)
+    .await?;
+
+  Ok(AppResponse::Ok().into())
 }

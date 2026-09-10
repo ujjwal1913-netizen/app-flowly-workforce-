@@ -60,6 +60,7 @@ export function useNotifications(workspaceId: string | undefined): UseNotificati
   const activeWorkspaceIdRef = useRef<string | undefined>(workspaceId);
   const hasDeferredInitialRefreshRef = useRef(false);
   const scheduledRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const unsupportedRef = useRef(false);
   const refreshRef = useRef<(source: RefreshSource) => Promise<void>>(async () => undefined);
 
   const clearScheduledRefresh = useCallback(() => {
@@ -72,6 +73,8 @@ export function useNotifications(workspaceId: string | undefined): UseNotificati
   const scheduleNextRefresh = useCallback(
     (delay: number) => {
       clearScheduledRefresh();
+
+      if (unsupportedRef.current) return;
 
       const refreshSession = refreshSessionRef.current;
       const currentWorkspaceId = activeWorkspaceIdRef.current;
@@ -96,6 +99,7 @@ export function useNotifications(workspaceId: string | undefined): UseNotificati
   );
 
   const resetNotificationState = useCallback(() => {
+    unsupportedRef.current = false;
     setNotifications([]);
     setUnreadCount(0);
     setHasLoaded(false);
@@ -153,6 +157,11 @@ export function useNotifications(workspaceId: string | undefined): UseNotificati
         archiveOffsetRef.current = archiveItems.length;
       } catch (e) {
         console.error('[useNotifications] refresh failed', e);
+        const status = (e as { httpStatus?: number; status?: number })?.httpStatus ?? (e as { status?: number })?.status;
+        if (status === 404 || status === 501) {
+          unsupportedRef.current = true;
+          clearScheduledRefresh();
+        }
       } finally {
         if (
           mountedRef.current &&
@@ -186,7 +195,9 @@ export function useNotifications(workspaceId: string | undefined): UseNotificati
         return;
       }
 
-      scheduleNextRefresh(getNextNotificationRefreshDelay());
+      if (!unsupportedRef.current) {
+        scheduleNextRefresh(getNextNotificationRefreshDelay());
+      }
     });
 
     refreshInFlightRef.current = refreshPromise;

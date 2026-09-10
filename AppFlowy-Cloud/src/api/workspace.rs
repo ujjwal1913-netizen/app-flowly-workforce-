@@ -269,6 +269,30 @@ pub fn workspace_scope() -> Scope {
         .route(web::post().to(move_page_to_trash_handler)),
     )
     .service(
+      web::resource("/{workspace_id}/document/{view_id}/inline-comment")
+        .route(web::get().to(crate::biz::workspace::inline_comment::get_inline_comments))
+        .route(web::post().to(crate::biz::workspace::inline_comment::create_inline_comment_legacy))
+        .route(web::delete().to(crate::biz::workspace::inline_comment::delete_inline_comment)),
+    )
+    .service(
+      web::resource("/{workspace_id}/document/{view_id}/inline-comment/v2")
+        .route(web::post().to(crate::biz::workspace::inline_comment::create_inline_comment_v2)),
+    )
+    .service(
+      web::resource("/{workspace_id}/document/{view_id}/inline-comment/anchor")
+        .route(web::put().to(crate::biz::workspace::inline_comment::update_inline_comment_anchor)),
+    )
+    .service(
+      web::resource("/{workspace_id}/document/{view_id}/inline-comment/resolve")
+        .route(web::put().to(crate::biz::workspace::inline_comment::resolve_inline_comment)),
+    )
+    .service(
+      web::resource("/{workspace_id}/document/{view_id}/inline-comment/reaction")
+        .route(web::get().to(crate::biz::workspace::inline_comment::get_inline_comment_reactions))
+        .route(web::post().to(crate::biz::workspace::inline_comment::create_inline_comment_reaction))
+        .route(web::delete().to(crate::biz::workspace::inline_comment::delete_inline_comment_reaction)),
+    )
+    .service(
       web::resource("/{workspace_id}/page-view/{view_id}/restore-from-trash")
         .route(web::post().to(restore_page_from_trash_handler)),
     )

@@ -18,7 +18,9 @@ pub fn search_scope() -> Scope {
   web::scope("/api/search")
     .service(web::resource("{workspace_id}").route(web::get().to(document_search_handler)))
     .service(
-      web::resource("/{workspace_id}/summary").route(web::get().to(summary_search_results_handler)),
+      web::resource("/{workspace_id}/summary")
+        .route(web::get().to(summary_search_results_handler))
+        .route(web::post().to(summary_search_results_handler)),
     )
 }
 

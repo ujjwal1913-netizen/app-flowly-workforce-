@@ -572,3 +572,16 @@ export async function reorderWorkspaces(workspaceIds: string[]) {
     })
   );
 }
+
+export interface WorkspaceStorageUsage {
+  consumed_capacity: number;
+}
+
+export async function getWorkspaceStorageUsage(workspaceId: string): Promise<WorkspaceStorageUsage> {
+  const url = `/api/file_storage/${encodeURIComponent(workspaceId)}/usage`;
+
+  return executeAPIRequest<WorkspaceStorageUsage>(() =>
+    getAxios()?.get<APIResponse<WorkspaceStorageUsage>>(url)
+  );
+}
+

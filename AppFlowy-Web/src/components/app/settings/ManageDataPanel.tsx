@@ -1,8 +1,9 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 
 import { ExportService, FileService } from '@/application/services/domains';
+import { getWorkspaceStorageUsage } from '@/application/services/js-services/http/workspace-api';
 import { isSameUserUid } from '@/application/user-uid';
 import { ReactComponent as HelpIcon } from '@/assets/icons/help.svg';
 import { useCurrentWorkspaceId, useUserWorkspaceInfo } from '@/components/app/app.hooks';
@@ -11,6 +12,14 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { getErrorMessage } from '@/utils/errors';
 import { openUrl } from '@/utils/url';
+
+function formatBytes(bytes: number): string {
+  if (bytes <= 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
+}
 
 const ZIP_ACCEPT = '.zip,application/zip,application/x-zip,application/x-zip-compressed';
 
@@ -26,6 +35,34 @@ export function ManageDataPanel() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
   const [backingUp, setBackingUp] = useState(false);
+  const [storageUsage, setStorageUsage] = useState<number | null>(null);
+  const [isLoadingStorage, setIsLoadingStorage] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!currentWorkspaceId) return;
+    let isCancelled = false;
+    setIsLoadingStorage(true);
+    getWorkspaceStorageUsage(currentWorkspaceId)
+      .then((res) => {
+        if (!isCancelled) {
+          setStorageUsage(res.consumed_capacity);
+        }
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setStorageUsage(0);
+        }
+      })
+      .finally(() => {
+        if (!isCancelled) {
+          setIsLoadingStorage(false);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [currentWorkspaceId]);
 
   const isOwner = useMemo(() => {
     const workspace = userWorkspaceInfo?.workspaces.find((w) => w.id === currentWorkspaceId);
@@ -150,6 +187,26 @@ export function ManageDataPanel() {
             </Button>
           </section>
         )}
+
+        {/* Storage usage */}
+        <div className='border-b border-border-primary' />
+        <section className='flex items-center justify-between gap-4 py-4'>
+          <div className='min-w-0'>
+            <h3 className='text-base font-semibold text-text-primary'>
+              {t('settings.manageData.storageUsage.title', { defaultValue: 'Storage Usage' })}
+            </h3>
+            <p className='mt-1 text-sm text-text-secondary'>
+              {t('settings.manageData.storageUsage.description', {
+                defaultValue: 'Total cloud storage consumed by files and attachments in this workspace.',
+              })}
+            </p>
+          </div>
+          <div className='text-right'>
+            <span className='text-base font-semibold text-text-primary' data-testid='manage-data-storage-usage'>
+              {isLoadingStorage ? '...' : formatBytes(storageUsage ?? 0)}
+            </span>
+          </div>
+        </section>
       </div>
     </div>
   );

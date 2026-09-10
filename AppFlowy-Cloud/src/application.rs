@@ -61,6 +61,7 @@ use crate::api::file_storage::file_storage_scope;
 use crate::api::guest::sharing_scope;
 use crate::api::invite_code::invite_code_scope;
 use crate::api::metrics::metrics_scope;
+use crate::api::public_form::public_form_scope;
 use crate::api::search::search_scope;
 use crate::api::server_info::{auth_providers_scope, server_info_scope};
 use crate::api::template::template_scope;
@@ -175,6 +176,7 @@ pub async fn run_actix_server(
       .service(data_import_scope())
       .service(access_request_scope())
       .service(sharing_scope())
+      .service(public_form_scope())
       .service(
         web::scope("/gotrue")
           .default_service(web::route().to(gotrue_proxy_handler)),

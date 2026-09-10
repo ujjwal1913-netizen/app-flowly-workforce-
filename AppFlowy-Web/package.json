@@ -112,6 +112,7 @@
     "events": "^3.3.0",
     "fast-json-patch": "^3.1.1",
     "framer-motion": "^12.6.3",
+    "fzstd": "^0.1.1",
     "google-protobuf": "^3.15.12",
     "hast-util-to-mdast": "^10.1.0",
     "heic2any": "^0.0.4",

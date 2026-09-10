@@ -1,4 +1,5 @@
 pub mod duplicate;
+pub mod inline_comment;
 pub mod invite;
 pub mod ops;
 pub mod page_view;

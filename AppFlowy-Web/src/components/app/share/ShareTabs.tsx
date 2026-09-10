@@ -86,7 +86,7 @@ function ShareTabs({
         label: t('shareAction.exportAsTab'),
         Panel: ExportPanel,
       },
-      currentUser?.email?.endsWith('appflowy.io') &&
+      canShare &&
         view?.is_published && {
           value: TabKey.TEMPLATE,
           label: t('template.asTemplate'),
@@ -104,7 +104,7 @@ function ShareTabs({
         onOpenPublishManage?: () => void;
       }>;
     }>;
-  }, [currentUser?.email, hidePublish, t, view?.is_published]);
+  }, [canShare, hidePublish, t, view?.is_published]);
 
   useEffect(() => {
     if (opened) {
