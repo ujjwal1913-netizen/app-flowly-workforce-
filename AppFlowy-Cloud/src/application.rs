@@ -137,6 +137,7 @@ pub async fn run_actix_server(
   .unwrap();
 
   let proxy_client = reqwest::Client::builder()
+    .redirect(reqwest::redirect::Policy::none())
     .timeout(Duration::from_secs(30))
     .build()
     .expect("Failed to build proxy reqwest client");
@@ -651,11 +652,25 @@ async fn gotrue_proxy_handler(
         {
           continue;
         }
+        if n.eq_ignore_ascii_case("location") {
+          if let Ok(loc_str) = value.to_str() {
+            let rewritten_loc = if loc_str.starts_with('/') && !loc_str.starts_with("/gotrue") {
+              format!("/gotrue{}", loc_str)
+            } else {
+              loc_str.to_string()
+            };
+            if let Ok(h_val) = actix_web::http::header::HeaderValue::from_str(&rewritten_loc) {
+              builder.append_header((actix_web::http::header::LOCATION, h_val));
+              continue;
+            }
+          }
+        }
+
         if let (Ok(h_name), Ok(h_val)) = (
           actix_web::http::header::HeaderName::from_bytes(n.as_bytes()),
           actix_web::http::header::HeaderValue::from_bytes(value.as_bytes()),
         ) {
-          builder.insert_header((h_name, h_val));
+          builder.append_header((h_name, h_val));
         }
       }
       match resp.bytes().await {
