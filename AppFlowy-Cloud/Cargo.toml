@@ -317,6 +317,7 @@ collab-importer = { git = "https://github.com/AppFlowy-IO/AppFlowy-Collab", rev 
 collab-plugins = { git = "https://github.com/AppFlowy-IO/AppFlowy-Collab", rev = "e59260e524f33104b0ddcd6bb8f6218cad0f7e18" }
 
 [features]
+default = ["use_actix_cors"]
 history = []
 # Some AI test features are not available for self-hosted AppFlowy Cloud. Therefore, AI testing is disabled by default.
 ai-test-enabled = ["client-api-test/ai-test-enabled"]
