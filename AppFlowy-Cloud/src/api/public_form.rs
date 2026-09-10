@@ -111,13 +111,15 @@ async fn get_public_form_handler(
 
   // Synthesize default active form if token is a valid view uuid
   if let Ok(view_id) = Uuid::parse_str(&token) {
-    let view_exists = sqlx::query_scalar!(
-      r#"SELECT EXISTS(SELECT 1 FROM af_view WHERE view_id = $1) AS "exists!""#,
-      view_id
-    )
-    .fetch_one(&state.pg_pool)
-    .await
-    .unwrap_or(true);
+    let view_exists = match sqlx::query("SELECT 1 FROM af_view WHERE view_id = $1")
+      .bind(view_id)
+      .fetch_optional(&state.pg_pool)
+      .await
+    {
+      Ok(Some(_)) => true,
+      Ok(None) => false,
+      Err(_) => true,
+    };
 
     if view_exists {
       let default_schema = serde_json::json!({
@@ -186,15 +188,14 @@ async fn submit_public_form_handler(
   } else {
     let dummy_id = Uuid::new_v4();
     let view_uuid = Uuid::parse_str(&token).unwrap_or(dummy_id);
-    let ws_uuid = sqlx::query_scalar!(
-      "SELECT workspace_id FROM af_view WHERE view_id = $1",
-      view_uuid
-    )
-    .fetch_optional(&state.pg_pool)
-    .await
-    .ok()
-    .flatten()
-    .unwrap_or(dummy_id);
+    let ws_uuid: Uuid = sqlx::query("SELECT workspace_id FROM af_view WHERE view_id = $1")
+      .bind(view_uuid)
+      .fetch_optional(&state.pg_pool)
+      .await
+      .ok()
+      .flatten()
+      .and_then(|r| r.try_get::<Uuid, _>("workspace_id").ok())
+      .unwrap_or(dummy_id);
 
     sqlx::query(
       r#"

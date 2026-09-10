@@ -108,7 +108,6 @@ pub async fn get_inline_comments(
   query: Query<GetInlineCommentsQuery>,
 ) -> Result<JsonAppResponse<InlineCommentsResponse>> {
   let (workspace_id, view_id) = path.into_inner();
-  let user_uuid = user_uuid.0;
   let uid = state.user_cache.get_user_uid(&user_uuid).await?;
   state
     .workspace_access_control
@@ -215,11 +214,10 @@ pub async fn create_inline_comment_legacy(
   payload: Json<CreateInlineCommentRequest>,
 ) -> Result<JsonAppResponse<()>> {
   let (workspace_id, view_id) = path.into_inner();
-  let user_uuid = user_uuid.0;
   let uid = state.user_cache.get_user_uid(&user_uuid).await?;
   state
     .workspace_access_control
-    .enforce_action(&uid, &workspace_id, Action::Comment)
+    .enforce_action(&uid, &workspace_id, Action::Write)
     .await?;
 
   let comment_id = Uuid::new_v4();
@@ -252,11 +250,10 @@ pub async fn create_inline_comment_v2(
   payload: Json<CreateInlineCommentRequest>,
 ) -> Result<JsonAppResponse<CreateInlineCommentResponse>> {
   let (workspace_id, view_id) = path.into_inner();
-  let user_uuid = user_uuid.0;
   let uid = state.user_cache.get_user_uid(&user_uuid).await?;
   state
     .workspace_access_control
-    .enforce_action(&uid, &workspace_id, Action::Comment)
+    .enforce_action(&uid, &workspace_id, Action::Write)
     .await?;
 
   let comment_id = Uuid::new_v4();
@@ -293,11 +290,10 @@ pub async fn delete_inline_comment(
   payload: Json<DeleteInlineCommentRequest>,
 ) -> Result<JsonAppResponse<()>> {
   let (workspace_id, view_id) = path.into_inner();
-  let user_uuid = user_uuid.0;
   let uid = state.user_cache.get_user_uid(&user_uuid).await?;
   state
     .workspace_access_control
-    .enforce_action(&uid, &workspace_id, Action::Comment)
+    .enforce_action(&uid, &workspace_id, Action::Write)
     .await?;
 
   sqlx::query(
@@ -324,11 +320,10 @@ pub async fn resolve_inline_comment(
   payload: Json<ResolveInlineCommentRequest>,
 ) -> Result<JsonAppResponse<()>> {
   let (workspace_id, view_id) = path.into_inner();
-  let user_uuid = user_uuid.0;
   let uid = state.user_cache.get_user_uid(&user_uuid).await?;
   state
     .workspace_access_control
-    .enforce_action(&uid, &workspace_id, Action::Comment)
+    .enforce_action(&uid, &workspace_id, Action::Write)
     .await?;
 
   sqlx::query(
@@ -356,11 +351,10 @@ pub async fn update_inline_comment_anchor(
   _payload: Json<AnchorUpdateRequest>,
 ) -> Result<JsonAppResponse<()>> {
   let (workspace_id, _view_id) = path.into_inner();
-  let user_uuid = user_uuid.0;
   let uid = state.user_cache.get_user_uid(&user_uuid).await?;
   state
     .workspace_access_control
-    .enforce_action(&uid, &workspace_id, Action::Comment)
+    .enforce_action(&uid, &workspace_id, Action::Write)
     .await?;
 
   Ok(AppResponse::Ok().into())
@@ -373,7 +367,6 @@ pub async fn get_inline_comment_reactions(
   query: Query<GetReactionsQuery>,
 ) -> Result<JsonAppResponse<GetReactionsResponse>> {
   let (workspace_id, view_id) = path.into_inner();
-  let user_uuid = user_uuid.0;
   let uid = state.user_cache.get_user_uid(&user_uuid).await?;
   state
     .workspace_access_control
@@ -462,11 +455,10 @@ pub async fn create_inline_comment_reaction(
   payload: Json<CommentReactionRequest>,
 ) -> Result<JsonAppResponse<()>> {
   let (workspace_id, _view_id) = path.into_inner();
-  let user_uuid = user_uuid.0;
   let uid = state.user_cache.get_user_uid(&user_uuid).await?;
   state
     .workspace_access_control
-    .enforce_action(&uid, &workspace_id, Action::Comment)
+    .enforce_action(&uid, &workspace_id, Action::Write)
     .await?;
 
   sqlx::query(
@@ -493,11 +485,10 @@ pub async fn delete_inline_comment_reaction(
   payload: Json<CommentReactionRequest>,
 ) -> Result<JsonAppResponse<()>> {
   let (workspace_id, _view_id) = path.into_inner();
-  let user_uuid = user_uuid.0;
   let uid = state.user_cache.get_user_uid(&user_uuid).await?;
   state
     .workspace_access_control
-    .enforce_action(&uid, &workspace_id, Action::Comment)
+    .enforce_action(&uid, &workspace_id, Action::Write)
     .await?;
 
   sqlx::query(

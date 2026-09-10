@@ -1,16 +1,16 @@
 # syntax=docker/dockerfile:1
 # Using cargo-chef to manage Rust build cache effectively
-FROM lukemathwalker/cargo-chef:latest-rust-1.86 as chef
+FROM lukemathwalker/cargo-chef:latest-rust-1.86 AS chef
 
 WORKDIR /app
 RUN apt update && apt install lld clang -y
 
-FROM chef as planner
+FROM chef AS planner
 COPY . .
 # Compute a lock-like file for our project
 RUN cargo chef prepare --recipe-path recipe.json
 
-FROM chef as builder
+FROM chef AS builder
 
 # Update package lists and install protobuf-compiler along with other build dependencies
 RUN apt update && apt install -y protobuf-compiler lld clang
@@ -32,7 +32,7 @@ RUN if [ "$PROFILE" = "release" ]; then \
     fi
 
 COPY . .
-ENV SQLX_OFFLINE true
+ENV SQLX_OFFLINE=true
 
 # Build the project
 RUN echo "Building with profile: ${PROFILE}, features: ${FEATURES}, "
@@ -61,8 +61,8 @@ RUN if [ "$PROFILE" = "release" ]; then \
       echo "Using debug binary"; \
     fi
 COPY --from=builder /app/target/$PROFILE/appflowy_cloud /usr/local/bin/appflowy_cloud
-ENV APP_ENVIRONMENT production
-ENV RUST_BACKTRACE 1
+ENV APP_ENVIRONMENT=production
+ENV RUST_BACKTRACE=1
 
 ARG APPFLOWY_APPLICATION_PORT
 ARG PORT

@@ -40,7 +40,6 @@ async fn list_shared_views_handler(
   path: web::Path<Uuid>,
 ) -> Result<JsonAppResponse<SharedViews>> {
   let workspace_id = path.into_inner();
-  let user_uuid = user_uuid.0;
   let uid = state.user_cache.get_user_uid(&user_uuid).await?;
   state
     .workspace_access_control
@@ -64,7 +63,6 @@ async fn put_shared_view_handler(
   path: web::Path<Uuid>,
 ) -> Result<JsonAppResponse<()>> {
   let workspace_id = path.into_inner();
-  let user_uuid = user_uuid.0;
   let uid = state.user_cache.get_user_uid(&user_uuid).await?;
   state
     .workspace_access_control
@@ -81,7 +79,6 @@ async fn shared_view_access_details_handler(
   path: web::Path<(Uuid, Uuid)>,
 ) -> Result<JsonAppResponse<SharedViewDetails>> {
   let (workspace_id, view_id) = path.into_inner();
-  let user_uuid = user_uuid.0;
   let uid = state.user_cache.get_user_uid(&user_uuid).await?;
   state
     .workspace_access_control
@@ -129,7 +126,6 @@ async fn revoke_shared_view_access_handler(
   path: web::Path<(Uuid, Uuid)>,
 ) -> Result<JsonAppResponse<()>> {
   let (workspace_id, _view_id) = path.into_inner();
-  let user_uuid = user_uuid.0;
   let uid = state.user_cache.get_user_uid(&user_uuid).await?;
   state
     .workspace_access_control
