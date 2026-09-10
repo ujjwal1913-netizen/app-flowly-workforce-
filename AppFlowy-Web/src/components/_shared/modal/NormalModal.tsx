@@ -88,9 +88,9 @@ export function NormalModal({
         style={{
           overflow: overflowHidden ? 'hidden' : 'auto',
         }}
-        className={'relative flex flex-col gap-4 p-5'}
+        className={'relative flex max-h-full flex-col gap-4 p-5'}
       >
-        <div className={'flex w-full items-center justify-between text-base font-medium'}>
+        <div className={'flex w-full shrink-0 items-center justify-between text-base font-medium'}>
           <div id={internalTitleId} className={'flex-1 truncate text-center font-medium'}>
             {title}
           </div>
@@ -113,13 +113,13 @@ export function NormalModal({
           style={{
             overflow: overflowHidden ? 'hidden' : 'auto',
           }}
-          className={'w-full flex-1'}
+          className={'min-h-0 w-full flex-1'}
         >
           {children}
         </div>
         {showActions && (
           // Desktop footers are right-aligned with a spacing.l gap, cancel first.
-          <div className={'flex w-full justify-end gap-3'}>
+          <div className={'flex w-full shrink-0 justify-end gap-3'}>
             <Button
               // MUI's Button defaulted to type="button"; the design-system one
               // does not, and a bare button inside a <form> would submit it.

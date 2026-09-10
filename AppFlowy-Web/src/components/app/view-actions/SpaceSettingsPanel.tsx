@@ -449,7 +449,7 @@ const PrivateMembersContent = memo(function PrivateMembersContent({
 
   return (
     <div
-      className='appflowy-scroller flex max-h-[64vh] flex-col gap-4 overflow-y-auto py-2 pr-1'
+      className='appflowy-scroller flex max-h-[min(58vh,calc(100vh-220px))] flex-col gap-4 overflow-y-auto py-2 pr-1'
       data-testid='private-space-members-content'
     >
       <div
@@ -547,13 +547,16 @@ function SpaceSettingsPanel({
       okLoading={primaryActionLoading}
       okButtonProps={{ disabled: primaryActionDisabled, 'data-testid': 'create-space-submit' }}
       title={title}
-      classes={{ container: 'items-start max-md:mt-auto max-md:items-center mt-[6%]' }}
+      classes={{ container: 'items-center max-md:mt-auto' }}
       showActions={showActions}
       overflowHidden
       PaperProps={{
         style: {
           width: MODAL_WIDTH,
           maxWidth: '92vw',
+          maxHeight: 'calc(100vh - 32px)',
+          display: 'flex',
+          flexDirection: 'column',
         },
         'data-testid': modalTestId,
       }}
@@ -562,11 +565,11 @@ function SpaceSettingsPanel({
         value={activeTab}
         onValueChange={(value) => onTabChange(value as SpaceSettingsTab)}
         aria-busy={primaryActionLoading || undefined}
-        className='min-h-0 max-w-full'
+        className='flex min-h-0 max-w-full flex-1 flex-col'
         style={{ width: CONTENT_WIDTH }}
         data-testid='space-settings-panel'
       >
-        <TabsList>
+        <TabsList className='shrink-0'>
           <TabsTrigger value='general' disabled={primaryActionLoading}>
             {t('space.permissionManager.generalTab')}
           </TabsTrigger>
@@ -577,8 +580,8 @@ function SpaceSettingsPanel({
           )}
         </TabsList>
 
-        <TabsContent value='general' className='min-h-0'>
-          <div ref={setContainer} className='appflowy-scroller max-h-[64vh] overflow-y-auto pr-1'>
+        <TabsContent value='general' className='min-h-0 flex-1 overflow-hidden'>
+          <div ref={setContainer} className='appflowy-scroller max-h-[min(58vh,calc(100vh-220px))] overflow-y-auto pr-1'>
             <div className='flex flex-col gap-6 py-2'>
               <div className='flex flex-col gap-2'>
                 <div className='text-sm font-medium text-text-secondary'>{t('space.spaceName')}</div>
@@ -690,7 +693,7 @@ function SpaceSettingsPanel({
         </TabsContent>
 
         {membersTabVisible && (
-          <TabsContent value='members' className='min-h-0'>
+          <TabsContent value='members' className='min-h-0 flex-1 overflow-hidden'>
             {draftIsPrivate ? <PrivateMembersContent owner={privateOwner} /> : membersContent}
           </TabsContent>
         )}
