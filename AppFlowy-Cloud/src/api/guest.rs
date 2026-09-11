@@ -25,6 +25,10 @@ pub fn sharing_scope() -> Scope {
         .route(web::put().to(put_shared_view_handler)),
     )
     .service(
+      web::resource("{workspace_id}/view/{view_id}")
+        .route(web::get().to(crate::api::workspace::get_page_view_handler)),
+    )
+    .service(
       web::resource("{workspace_id}/view/{view_id}/access-details")
         .route(web::post().to(shared_view_access_details_handler)),
     )

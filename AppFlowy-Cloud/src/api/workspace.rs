@@ -242,6 +242,27 @@ pub fn workspace_scope() -> Scope {
         .route(web::patch().to(update_page_view_handler)),
     )
     .service(
+      web::resource("/{workspace_id}/view/{view_id}")
+        .route(web::get().to(get_page_view_handler))
+        .route(web::patch().to(update_page_view_handler)),
+    )
+    .service(
+      web::resource("/{workspace_id}/view/{view_id}/navigation")
+        .route(web::get().to(get_page_view_handler)),
+    )
+    .service(
+      web::resource("/{workspace_id}/notifications/unread-count")
+        .route(web::get().to(get_unread_count_handler)),
+    )
+    .service(
+      web::resource("/{workspace_id}/notifications")
+        .route(web::get().to(list_notifications_handler)),
+    )
+    .service(
+      web::resource("/{workspace_id}/collab/{object_id}/permission")
+        .route(web::get().to(get_collab_permission_handler)),
+    )
+    .service(
       web::resource("/{workspace_id}/page-view/{view_id}/mentionable-person-with-access")
         .route(web::get().to(list_page_mentionable_person_with_access_handler))
     )
@@ -2098,7 +2119,7 @@ async fn remove_page_icon_handler(
   Ok(Json(AppResponse::Ok()))
 }
 
-async fn get_page_view_handler(
+pub(crate) async fn get_page_view_handler(
   user_uuid: UserUuid,
   path: web::Path<(Uuid, Uuid)>,
   state: Data<AppState>,
@@ -3309,4 +3330,16 @@ async fn post_workspace_invite_code_handler(
     generate_workspace_invite_token(&state.pg_pool, &workspace_id, data.validity_period_hours)
       .await?;
   Ok(Json(AppResponse::Ok().with_data(workspace_invite_link)))
+}
+
+async fn get_unread_count_handler() -> Result<Json<AppResponse<serde_json::Value>>> {
+  Ok(Json(AppResponse::Ok().with_data(serde_json::json!({ "unread_count": 0 }))))
+}
+
+async fn list_notifications_handler() -> Result<Json<AppResponse<serde_json::Value>>> {
+  Ok(Json(AppResponse::Ok().with_data(serde_json::json!({ "notifications": [], "has_more": false }))))
+}
+
+async fn get_collab_permission_handler() -> Result<Json<AppResponse<serde_json::Value>>> {
+  Ok(Json(AppResponse::Ok().with_data(serde_json::json!({ "access_level": 4, "role": 3 }))))
 }
