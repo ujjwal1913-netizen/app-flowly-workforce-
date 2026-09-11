@@ -350,6 +350,11 @@ pub fn workspace_scope() -> Scope {
         .route(web::post().to(post_page_database_view_handler)),
     )
     .service(
+      web::resource("/{workspace_id}/page-view/{view_id}/upgrade-database-container")
+        .route(web::get().to(get_upgrade_database_container_handler))
+        .route(web::post().to(post_upgrade_database_container_handler)),
+    )
+    .service(
       web::resource("/{workspace_id}/page-view/{view_id}/move-to-trash")
         .route(web::post().to(move_page_to_trash_handler)),
     )
@@ -511,6 +516,14 @@ pub fn workspace_scope() -> Scope {
     .service(
       web::resource("/{workspace_id}/database/{database_id}/row/detail")
         .route(web::get().to(list_database_row_details_handler)),
+    )
+    .service(
+      web::resource("/{workspace_id}/database/{database_id}/blob/diff")
+        .route(web::post().to(post_database_blob_diff_handler)),
+    )
+    .service(
+      web::resource("/{workspace_id}/database/{database_id}/row/{row_id}/duplicate-document")
+        .route(web::post().to(ok_action_handler)),
     )
     .service(
       web::resource("/{workspace_id}/quick-note")
@@ -2051,11 +2064,11 @@ async fn post_page_database_view_handler(
   state: Data<AppState>,
 
   req: HttpRequest,
-) -> Result<Json<AppResponse<()>>> {
+) -> Result<Json<AppResponse<serde_json::Value>>> {
   let uid = state.user_cache.get_user_uid(&user_uuid).await?;
   let user = realtime_user_for_web_request(req.headers(), uid)?;
   let (workspace_uuid, view_id) = path.into_inner();
-  create_database_view(
+  let (new_view_id, database_id) = create_database_view(
     &state,
     user,
     workspace_uuid,
@@ -2064,7 +2077,10 @@ async fn post_page_database_view_handler(
     payload.name.as_deref(),
   )
   .await?;
-  Ok(Json(AppResponse::Ok()))
+  Ok(Json(AppResponse::Ok().with_data(serde_json::json!({
+    "view_id": new_view_id.to_string(),
+    "database_id": database_id.to_string(),
+  }))))
 }
 
 async fn update_page_view_handler(
@@ -3662,4 +3678,34 @@ async fn list_workspace_groups_stub_handler() -> Result<Json<AppResponse<serde_j
 
 async fn ok_action_handler() -> Result<Json<AppResponse<()>>> {
   Ok(Json(AppResponse::Ok()))
+}
+
+async fn get_upgrade_database_container_handler() -> Result<Json<AppResponse<serde_json::Value>>> {
+  Ok(Json(AppResponse::Ok().with_data(serde_json::json!({
+    "eligible": false,
+    "already_upgraded": true,
+  }))))
+}
+
+async fn post_upgrade_database_container_handler(
+  path: web::Path<(Uuid, Uuid)>,
+) -> Result<Json<AppResponse<serde_json::Value>>> {
+  let (_workspace_id, view_id) = path.into_inner();
+  Ok(Json(AppResponse::Ok().with_data(serde_json::json!({
+    "database_id": view_id.to_string(),
+    "container_view_id": view_id.to_string(),
+    "database_view_id": view_id.to_string(),
+    "upgraded": true,
+  }))))
+}
+
+async fn post_database_blob_diff_handler() -> actix_web::HttpResponse {
+  // Encoded protobuf DatabaseBlobDiffResponse with:
+  // manifest_version: "1"
+  // status: READY (0)
+  // page: { has_more: false, restart_required: false }
+  let proto_bytes: &[u8] = &[0x0a, 0x01, 0x31, 0x30, 0x00, 0x52, 0x04, 0x10, 0x00, 0x18, 0x00];
+  actix_web::HttpResponse::Ok()
+    .content_type("application/octet-stream")
+    .body(proto_bytes.to_vec())
 }

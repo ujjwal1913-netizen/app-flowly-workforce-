@@ -222,13 +222,66 @@ pub async fn create_folder_view(
     update_workspace_database_data(
       &state.metrics.appflowy_web_metrics,
       &state.ws_server,
-      user,
+      user.clone(),
       workspace_id,
       workspace_database_id,
       workspace_database_update,
     )
     .await?;
   }
+
+  // Auto-initialize the default collab so the page view is not an empty shell without a collab
+  match view_layout {
+    ViewLayout::Document => {
+      if let Ok(default_params) = prepare_default_document_collab_param(default_client_id(), view_id).await {
+        let _ = state.collab_storage.upsert_collab(workspace_id, &user.uid, default_params).await;
+      }
+    },
+    ViewLayout::Grid | ViewLayout::Board | ViewLayout::Calendar => {
+      let db_id = database_id.unwrap_or_else(Uuid::new_v4);
+      let db_res = match view_layout {
+        ViewLayout::Board => {
+          prepare_default_board_encoded_database(&view_id, &db_id, name.unwrap_or_default()).await
+        },
+        ViewLayout::Calendar => {
+          prepare_default_calendar_encoded_database(&view_id, &db_id, name.unwrap_or_default()).await
+        },
+        _ => {
+          prepare_default_grid_encoded_database(&view_id, &db_id, name.unwrap_or_default()).await
+        },
+      };
+      if let Ok(default_encoded_db) = db_res {
+        if let Ok(encoded_bytes) = default_encoded_db
+          .encoded_database_collab
+          .encoded_collab
+          .encode_to_bytes()
+        {
+          let db_params = CollabParams {
+            object_id: db_id,
+            encoded_collab_v1: encoded_bytes.into(),
+            collab_type: CollabType::Database,
+            updated_at: None,
+          };
+          let row_params_list: Vec<CollabParams> = default_encoded_db
+            .encoded_row_collabs
+            .iter()
+            .flat_map(|r| {
+              Some(CollabParams {
+                object_id: r.object_id,
+                encoded_collab_v1: r.encoded_collab.encode_to_bytes().ok()?.into(),
+                collab_type: CollabType::DatabaseRow,
+                updated_at: None,
+              })
+            })
+            .collect();
+          let _ = state.collab_storage.upsert_collab(workspace_id, &user.uid, db_params).await;
+          let _ = state.collab_storage.batch_insert_new_collab(workspace_id, &user.uid, row_params_list).await;
+        }
+      }
+    },
+    _ => {},
+  }
+
   Ok(Page { view_id })
 }
 
@@ -258,12 +311,11 @@ pub async fn create_page(
       )
       .await
     },
-    //TODO: allow view id and database id to be overriden
-    ViewLayout::Grid => create_grid_page(state, user, workspace_id, parent_view_id, name).await,
+    ViewLayout::Grid => create_grid_page(state, user, workspace_id, parent_view_id, name, view_id).await,
     ViewLayout::Calendar => {
-      create_calendar_page(state, user, workspace_id, parent_view_id, name).await
+      create_calendar_page(state, user, workspace_id, parent_view_id, name, view_id).await
     },
-    ViewLayout::Board => create_board_page(state, user, workspace_id, parent_view_id, name).await,
+    ViewLayout::Board => create_board_page(state, user, workspace_id, parent_view_id, name, view_id).await,
     ViewLayout::Chat => create_chat_page(state, user, workspace_id, parent_view_id, name).await,
   }
 }
@@ -1127,8 +1179,9 @@ async fn create_grid_page(
   workspace_id: Uuid,
   parent_view_id: &Uuid,
   name: Option<&str>,
+  view_id: Option<Uuid>,
 ) -> Result<Page, AppError> {
-  let view_id = Uuid::new_v4();
+  let view_id = view_id.unwrap_or_else(Uuid::new_v4);
   let database_id: Uuid = gen_database_id().parse().unwrap();
   let default_grid_encoded_database =
     prepare_default_grid_encoded_database(&view_id, &database_id, name.unwrap_or_default()).await?;
@@ -1152,8 +1205,9 @@ async fn create_board_page(
   workspace_id: Uuid,
   parent_view_id: &Uuid,
   name: Option<&str>,
+  view_id: Option<Uuid>,
 ) -> Result<Page, AppError> {
-  let view_id = Uuid::new_v4();
+  let view_id = view_id.unwrap_or_else(Uuid::new_v4);
   let database_id = Uuid::new_v4();
   let default_board_encoded_database =
     prepare_default_board_encoded_database(&view_id, &database_id, name.unwrap_or_default())
@@ -1178,8 +1232,9 @@ async fn create_calendar_page(
   workspace_id: Uuid,
   parent_view_id: &Uuid,
   name: Option<&str>,
+  view_id: Option<Uuid>,
 ) -> Result<Page, AppError> {
-  let view_id = Uuid::new_v4();
+  let view_id = view_id.unwrap_or_else(Uuid::new_v4);
   let database_id = Uuid::new_v4();
   let default_calendar_encoded_database =
     prepare_default_calendar_encoded_database(&view_id, &database_id, name.unwrap_or_default())
@@ -1908,12 +1963,16 @@ async fn get_page_view_collab_for_orphaned_view(
         view_id, err
       ))
     })?;
-  let metadata = select_collab_meta_from_af_collab(pg_pool, view_id, &CollabType::Document)
-    .await?
-    .ok_or(AppError::Internal(anyhow::anyhow!(
-      "unable to find collab metadata"
-    )))?;
-  let owner = select_web_user_from_uid(pg_pool, metadata.owner_uid).await?;
+  let (created_at, owner) = match select_collab_meta_from_af_collab(pg_pool, view_id, &CollabType::Document).await? {
+    Some(metadata) => {
+      let owner = select_web_user_from_uid(pg_pool, metadata.owner_uid).await?;
+      (metadata.created_at.unwrap_or_default(), owner)
+    },
+    None => {
+      let owner = select_web_user_from_uid(pg_pool, uid).await?;
+      (chrono::Utc::now(), owner)
+    }
+  };
 
   Ok(PageCollab {
     view: FolderView {
@@ -1927,8 +1986,8 @@ async fn get_page_view_collab_for_orphaned_view(
       is_published: false,
       is_favorite: false,
       layout: ViewLayout::Document,
-      created_at: metadata.created_at.unwrap_or_default(),
-      created_by: Some(metadata.owner_uid),
+      created_at,
+      created_by: Some(uid),
       last_edited_by: None,
       last_edited_time: Default::default(),
       is_locked: Some(false),
@@ -1936,7 +1995,7 @@ async fn get_page_view_collab_for_orphaned_view(
       children: vec![],
     },
     data,
-    owner: owner.clone(),
+    owner,
     last_editor: None,
   })
 }
@@ -1998,7 +2057,7 @@ async fn get_page_view_collab_for_view_with_parent(
     collab_folder::ViewLayout::Grid
     | collab_folder::ViewLayout::Board
     | collab_folder::ViewLayout::Calendar => {
-      get_page_collab_data_for_database(pg_pool, collab_storage, uid, workspace_id, view_id).await
+      get_page_collab_data_for_database(pg_pool, collab_storage, uid, workspace_id, view_id, &view.layout).await
     },
     collab_folder::ViewLayout::Chat => Err(AppError::InvalidRequest(
       "Page view for AI chat is not supported at the moment".to_string(),
@@ -2021,6 +2080,7 @@ async fn get_page_collab_data_for_database(
   uid: i64,
   workspace_id: &Uuid,
   view_id: &Uuid,
+  view_layout: &collab_folder::ViewLayout,
 ) -> Result<PageCollabData, AppError> {
   let client_id = default_client_id();
   let ws_db_oid = select_workspace_database_oid(pg_pool, workspace_id)
@@ -2041,33 +2101,143 @@ async fn get_page_collab_data_for_database(
     client_id,
   )
   .await?;
-  let ws_db_body = WorkspaceDatabase::open(ws_db_collab).map_err(|err| {
+  let mut ws_db_body = WorkspaceDatabase::open(ws_db_collab).map_err(|err| {
     AppError::Internal(anyhow!("Failed to open workspace database body: {}", err))
   })?;
-  let db_oid = {
-    ws_db_body
-      .get_database_meta_with_view_id(&view_id.to_string())
-      .ok_or(AppError::NoRequiredData(format!(
-        "Database view {} not found",
-        view_id
-      )))?
-      .database_id
+  let db_oid_opt = ws_db_body
+    .get_database_meta_with_view_id(&view_id.to_string())
+    .map(|meta| meta.database_id);
+
+  let (db_oid_str, db) = match db_oid_opt {
+    Some(db_oid) => {
+      let fetch_res = match Uuid::parse_str(&db_oid) {
+        Ok(db_uuid) => collab_storage
+          .get_full_encode_collab(
+            GetCollabOrigin::User { uid },
+            workspace_id,
+            &db_uuid,
+            CollabType::Database,
+          )
+          .await
+          .map(|v| v.encoded_collab),
+        Err(e) => Err(AppError::RecordNotFound(format!("Invalid database uuid {}: {}", db_oid, e))),
+      };
+      match fetch_res {
+        Ok(encoded) => (db_oid, encoded),
+        Err(AppError::RecordNotFound(_)) => {
+          let target_db_id = Uuid::parse_str(&db_oid).unwrap_or_else(|_| Uuid::new_v4());
+          tracing::warn!(
+            "Database collab for view {} (db_id: {}) not found in storage; auto-initializing default database collab",
+            view_id, target_db_id
+          );
+          let default_encoded_db = match view_layout {
+            collab_folder::ViewLayout::Board => {
+              prepare_default_board_encoded_database(view_id, &target_db_id, "").await?
+            },
+            collab_folder::ViewLayout::Calendar => {
+              prepare_default_calendar_encoded_database(view_id, &target_db_id, "").await?
+            },
+            _ => {
+              prepare_default_grid_encoded_database(view_id, &target_db_id, "").await?
+            },
+          };
+          let db_params = CollabParams {
+            object_id: target_db_id,
+            encoded_collab_v1: default_encoded_db
+              .encoded_database_collab
+              .encoded_collab
+              .encode_to_bytes()?
+              .into(),
+            collab_type: CollabType::Database,
+            updated_at: None,
+          };
+          let row_params_list: Vec<CollabParams> = default_encoded_db
+            .encoded_row_collabs
+            .iter()
+            .flat_map(|row_collab| {
+              Some(CollabParams {
+                object_id: row_collab.object_id,
+                encoded_collab_v1: row_collab.encoded_collab.encode_to_bytes().ok()?.into(),
+                collab_type: CollabType::DatabaseRow,
+                updated_at: None,
+              })
+            })
+            .collect();
+
+          let _ = collab_storage.upsert_collab(*workspace_id, &uid, db_params).await;
+          let _ = collab_storage.batch_insert_new_collab(*workspace_id, &uid, row_params_list).await;
+
+          (target_db_id.to_string(), default_encoded_db.encoded_database_collab.encoded_collab)
+        },
+        Err(e) => return Err(e),
+      }
+    },
+    None => {
+      let target_db_id = Uuid::new_v4();
+      tracing::warn!(
+        "Database view {} not registered in workspace database; auto-initializing default database collab (db_id: {})",
+        view_id, target_db_id
+      );
+      let default_encoded_db = match view_layout {
+        collab_folder::ViewLayout::Board => {
+          prepare_default_board_encoded_database(view_id, &target_db_id, "").await?
+        },
+        collab_folder::ViewLayout::Calendar => {
+          prepare_default_calendar_encoded_database(view_id, &target_db_id, "").await?
+        },
+        _ => {
+          prepare_default_grid_encoded_database(view_id, &target_db_id, "").await?
+        },
+      };
+      let db_params = CollabParams {
+        object_id: target_db_id,
+        encoded_collab_v1: default_encoded_db
+          .encoded_database_collab
+          .encoded_collab
+          .encode_to_bytes()?
+          .into(),
+        collab_type: CollabType::Database,
+        updated_at: None,
+      };
+      let row_params_list: Vec<CollabParams> = default_encoded_db
+        .encoded_row_collabs
+        .iter()
+        .flat_map(|row_collab| {
+          Some(CollabParams {
+            object_id: row_collab.object_id,
+            encoded_collab_v1: row_collab.encoded_collab.encode_to_bytes().ok()?.into(),
+            collab_type: CollabType::DatabaseRow,
+            updated_at: None,
+          })
+        })
+        .collect();
+
+      let _ = collab_storage.upsert_collab(*workspace_id, &uid, db_params).await;
+      let _ = collab_storage.batch_insert_new_collab(*workspace_id, &uid, row_params_list).await;
+
+      let _ = add_new_database_to_workspace(&mut ws_db_body, &target_db_id, view_id).await;
+      if let Ok(full_ws_collab) = ws_db_body.collab.encode_collab() {
+        if let Ok(ws_bytes) = full_ws_collab.encode_to_bytes() {
+          let ws_db_params = CollabParams {
+            object_id: ws_db_oid,
+            encoded_collab_v1: ws_bytes.into(),
+            collab_type: CollabType::WorkspaceDatabase,
+            updated_at: None,
+          };
+          let _ = collab_storage.upsert_collab(*workspace_id, &uid, ws_db_params).await;
+        }
+      }
+
+      (target_db_id.to_string(), default_encoded_db.encoded_database_collab.encoded_collab)
+    }
   };
-  let db = collab_storage
-    .get_full_encode_collab(
-      GetCollabOrigin::User { uid },
-      workspace_id,
-      &Uuid::parse_str(&db_oid)?,
-      CollabType::Database,
-    )
-    .await
-    .map(|v| v.encoded_collab)?;
+
   let options =
-    CollabOptions::new(db_oid.to_string(), client_id).with_data_source(db.clone().into());
+    CollabOptions::new(db_oid_str.clone(), client_id).with_data_source(db.clone().into());
   let db_collab = Collab::new_with_options(CollabOrigin::Server, options).map_err(|err| {
     AppError::Internal(anyhow!(
       "Unable to create collab from object id {}: {}",
-      &db_oid,
+      &db_oid_str,
       err
     ))
   })?;
@@ -2126,7 +2296,7 @@ async fn get_page_collab_data_for_database(
   .map_err(|err| {
     AppError::Internal(anyhow::anyhow!(
       "Unable to get row data for database {}: {}",
-      &db_oid,
+      &db_oid_str,
       err
     ))
   })?;
@@ -2150,11 +2320,27 @@ async fn get_page_collab_data_for_document(
       view_id,
       CollabType::Document,
     )
-    .await
-    .map(|v| v.encoded_collab)?;
+    .await;
+
+  let encoded_collab = match collab {
+    Ok(v) => v.encoded_collab.doc_state.to_vec(),
+    Err(AppError::RecordNotFound(_)) => {
+      tracing::warn!(
+        "Document collab for view {} not found in storage; auto-initializing default document collab",
+        view_id
+      );
+      let default_params = prepare_default_document_collab_param(default_client_id(), *view_id).await?;
+      let doc_bytes = default_params.encoded_collab_v1.clone();
+      let _ = collab_storage.upsert_collab(*workspace_id, &uid, default_params).await;
+      let decoded = EncodedCollab::decode_from_bytes(&doc_bytes)
+        .map_err(|e| AppError::Internal(anyhow!("Failed to decode default document collab: {}", e)))?;
+      decoded.doc_state.to_vec()
+    },
+    Err(e) => return Err(e),
+  };
 
   Ok(PageCollabData {
-    encoded_collab: collab.doc_state.clone().to_vec(),
+    encoded_collab,
     row_data: HashMap::default(),
   })
 }
@@ -2167,7 +2353,7 @@ pub async fn create_database_view(
   database_view_id: &Uuid,
   view_layout: &ViewLayout,
   name: Option<&str>,
-) -> Result<(), AppError> {
+) -> Result<(Uuid, Uuid), AppError> {
   let database_layout = match view_layout {
     ViewLayout::Grid => DatabaseLayout::Grid,
     ViewLayout::Board => DatabaseLayout::Board,
@@ -2310,7 +2496,7 @@ pub async fn create_database_view(
   )
   .await?;
 
-  Ok(())
+  Ok((new_view_id, database_id))
 }
 
 #[instrument(level = "debug", skip_all)]
