@@ -69,7 +69,7 @@ use indexer::scheduler::{UnindexedCollabTask, UnindexedData};
 use itertools::Itertools;
 use prost::Message as ProstMessage;
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use semver::Version;
 use sha2::{Digest, Sha256};

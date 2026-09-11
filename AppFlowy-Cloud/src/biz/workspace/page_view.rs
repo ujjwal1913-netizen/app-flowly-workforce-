@@ -185,7 +185,7 @@ pub async fn create_folder_view(
     &view_id,
     &mut folder,
     name,
-    to_folder_view_layout(view_layout),
+    to_folder_view_layout(view_layout.clone()),
   )
   .await?;
   let (workspace_database_id, workspace_database_update) = if let Some(database_id) = database_id {
@@ -2216,7 +2216,7 @@ async fn get_page_collab_data_for_database(
       let _ = collab_storage.batch_insert_new_collab(*workspace_id, &uid, row_params_list).await;
 
       let _ = add_new_database_to_workspace(&mut ws_db_body, &target_db_id, view_id).await;
-      if let Ok(full_ws_collab) = ws_db_body.collab.encode_collab() {
+      if let Ok(full_ws_collab) = ws_db_body.collab.encode_collab_v1(|_| Ok::<(), anyhow::Error>(())) {
         if let Ok(ws_bytes) = full_ws_collab.encode_to_bytes() {
           let ws_db_params = CollabParams {
             object_id: ws_db_oid,
