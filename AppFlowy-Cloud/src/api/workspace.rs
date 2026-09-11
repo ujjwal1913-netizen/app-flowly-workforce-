@@ -202,6 +202,7 @@ pub fn workspace_scope() -> Scope {
         .route(web::post().to(batch_get_collab_embed_info_handler)),
     )
     .service(web::resource("/{workspace_id}/space").route(web::post().to(post_space_handler)))
+    .service(web::resource("/{workspace_id}/v2/space").route(web::post().to(post_space_v2_handler)))
     .service(
       web::resource("/{workspace_id}/space/{view_id}").route(web::patch().to(update_space_handler)),
     )
@@ -1447,6 +1448,70 @@ async fn post_space_handler(
   )
   .await?;
   Ok(Json(AppResponse::Ok().with_data(space)))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateInitialPageParams {
+  #[serde(default)]
+  pub layout: ViewLayout,
+  pub name: Option<String>,
+  pub view_id: Option<Uuid>,
+  pub database_id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateSpaceV2Params {
+  pub name: String,
+  #[serde(default)]
+  pub space_icon: String,
+  #[serde(default)]
+  pub space_icon_color: String,
+  #[serde(default)]
+  pub space_permission: SpacePermission,
+  pub view_id: Option<Uuid>,
+  pub initial_page: CreateInitialPageParams,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateSpaceV2Response {
+  pub space: Space,
+  pub page: Page,
+}
+
+async fn post_space_v2_handler(
+  user_uuid: UserUuid,
+  path: web::Path<Uuid>,
+  payload: Json<CreateSpaceV2Params>,
+  state: Data<AppState>,
+  req: HttpRequest,
+) -> Result<Json<AppResponse<CreateSpaceV2Response>>> {
+  let uid = state.user_cache.get_user_uid(&user_uuid).await?;
+  let workspace_uuid = path.into_inner();
+  let user = realtime_user_for_web_request(req.headers(), uid)?;
+  let p = payload.into_inner();
+  let space = create_space(
+    &state,
+    user.clone(),
+    workspace_uuid,
+    &p.space_permission,
+    &p.name,
+    &p.space_icon,
+    &p.space_icon_color,
+    p.view_id,
+  )
+  .await?;
+  let page = create_folder_view(
+    &state,
+    user,
+    workspace_uuid,
+    &space.view_id,
+    p.initial_page.layout,
+    p.initial_page.name.as_deref(),
+    p.initial_page.view_id,
+    p.initial_page.database_id,
+  )
+  .await?;
+  Ok(Json(AppResponse::Ok().with_data(CreateSpaceV2Response { space, page })))
 }
 
 async fn update_space_handler(

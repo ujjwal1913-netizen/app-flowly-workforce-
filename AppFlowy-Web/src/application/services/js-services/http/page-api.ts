@@ -420,6 +420,25 @@ export async function createSpaceWithInitialPage(workspaceId: string, payload: C
       };
     }
 
+    if (isUnsupportedRouteError(error)) {
+      Log.warn('[createSpaceWithInitialPage] /v2/space endpoint unavailable, falling back to composed createSpace + addAppPage', {
+        workspaceId,
+      });
+
+      const { initial_page, ...spacePayload } = payload;
+      const requestedSpaceId = payload.view_id ?? uuidv4();
+      const spaceId = await createSpace(workspaceId, {
+        ...spacePayload,
+        view_id: requestedSpaceId,
+      });
+      const page = await addAppPage(workspaceId, spaceId, initial_page);
+
+      return {
+        space: { view_id: spaceId },
+        page,
+      };
+    }
+
     throw error;
   }
 }

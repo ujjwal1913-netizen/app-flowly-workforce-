@@ -25,6 +25,8 @@ pub fn server_info_scope() -> Scope {
 
 pub fn auth_providers_scope() -> Scope {
   web::scope("/api/server-info")
+    .service(web::resource("").route(web::get().to(server_info_handler)))
+    .service(web::resource("/").route(web::get().to(server_info_handler)))
     .service(web::resource("/auth-providers").route(web::get().to(auth_providers_handler)))
     .service(web::resource("/auth-providers/").route(web::get().to(auth_providers_handler)))
 }

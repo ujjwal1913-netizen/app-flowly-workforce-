@@ -493,6 +493,39 @@ describe('createSpaceWithInitialPage', () => {
     ).rejects.toMatchObject({ code: -1 });
   });
 
+  it('falls back to composed createSpace + addAppPage when /v2/space returns 404', async () => {
+    const endpointMissing = { code: 404, message: 'Not Found', httpStatus: 404 };
+
+    post.mockImplementation(async (url: string) => {
+      if (url === '/api/workspace/workspace-id/v2/space') throw endpointMissing;
+      if (url === '/api/workspace/workspace-id/space') return apiResponse({ view_id: 'composed-space-id' });
+      if (url === '/api/workspace/workspace-id/page-view') return apiResponse({ view_id: 'composed-page-id' });
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    const payload = {
+      name: 'Legacy fallback space',
+      space_icon: '',
+      space_icon_color: '',
+      space_permission: SpacePermission.Private,
+      initial_page: { layout: ViewLayout.Document },
+    };
+
+    await expect(createSpaceWithInitialPage('workspace-id', payload)).resolves.toEqual({
+      space: { view_id: 'composed-space-id' },
+      page: { view_id: 'composed-page-id' },
+    });
+    expect(post).toHaveBeenCalledWith('/api/workspace/workspace-id/v2/space', payload);
+    expect(post).toHaveBeenCalledWith('/api/workspace/workspace-id/space', expect.objectContaining({
+      name: 'Legacy fallback space',
+      space_permission: SpacePermission.Private,
+    }));
+    expect(post).toHaveBeenCalledWith('/api/workspace/workspace-id/page-view', expect.objectContaining({
+      parent_view_id: 'composed-space-id',
+      layout: ViewLayout.Document,
+    }));
+  });
+
   it.each([
     [SpaceVisibility.Public, SpacePermission.Private],
     [SpaceVisibility.Private, SpacePermission.Public],

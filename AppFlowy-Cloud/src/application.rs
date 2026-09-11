@@ -588,21 +588,39 @@ async fn health_check() -> impl Responder {
 
 #[cfg(feature = "use_actix_cors")]
 fn actix_cors_scope() -> actix_cors::Cors {
-  Cors::default()
-    .allowed_origin(&get_env_var(
-      "APPFLOWY_CORS_ALLOWED_ORIGIN",
-      "http://localhost:3000",
-    ))
-    .allowed_methods(vec!["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
-    .allowed_headers(vec![
-      "Content-Type",
-      "Authorization",
-      "Accept",
-      "Client-Version",
-      "Device-Id",
-      "X-Request-Id",
-    ])
-    .max_age(3600)
+  let raw_origins = get_env_var("APPFLOWY_CORS_ALLOWED_ORIGIN", "*");
+
+  let cors = actix_cors::Cors::default()
+    .allow_any_method()
+    .allow_any_header()
+    .supports_credentials()
+    .max_age(3600);
+
+  if raw_origins == "*" {
+    cors.allowed_origin_fn(|_origin, _req_head| true)
+  } else {
+    let origins: Vec<String> = raw_origins
+      .split(',')
+      .map(|s| s.trim().to_string())
+      .filter(|s| !s.is_empty())
+      .collect();
+
+    let web_url = std::env::var("APPFLOWY_WEB_URL").ok();
+
+    cors.allowed_origin_fn(move |origin, _req_head| {
+      if let Ok(origin_str) = origin.to_str() {
+        if origins.iter().any(|o| o == "*" || o == origin_str) {
+          return true;
+        }
+        if let Some(ref w) = web_url {
+          if w.trim_end_matches('/') == origin_str.trim_end_matches('/') {
+            return true;
+          }
+        }
+      }
+      false
+    })
+  }
 }
 
 async fn gotrue_proxy_handler(
