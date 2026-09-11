@@ -203,7 +203,7 @@ pub struct CreateSpaceV2Params {
   #[serde(default)]
   pub space_icon_color: String,
   #[serde(default)]
-  pub space_permission: SpacePermission,
+  pub space_permission: Option<SpacePermission>,
   pub view_id: Option<Uuid>,
   pub initial_page: CreateInitialPageParams,
 }
@@ -459,6 +459,12 @@ impl Default for ViewLayout {
 pub enum SpacePermission {
   PublicToAll = 0,
   Private = 1,
+}
+
+impl Default for SpacePermission {
+  fn default() -> Self {
+    Self::PublicToAll
+  }
 }
 
 #[derive(Default, Debug, Deserialize, Serialize)]

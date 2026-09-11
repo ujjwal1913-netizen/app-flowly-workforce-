@@ -1461,11 +1461,12 @@ async fn post_space_v2_handler(
   let workspace_uuid = path.into_inner();
   let user = realtime_user_for_web_request(req.headers(), uid)?;
   let p = payload.into_inner();
+  let legacy_perm = p.space_permission.unwrap_or_default();
   let space = create_space(
     &state,
     user.clone(),
     workspace_uuid,
-    &p.space_permission,
+    &legacy_perm,
     &p.name,
     &p.space_icon,
     &p.space_icon_color,
