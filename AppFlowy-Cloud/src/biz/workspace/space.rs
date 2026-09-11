@@ -12,7 +12,9 @@ use shared_entity::dto::workspace_dto::{
 };
 use sqlx::Row;
 
-use crate::biz::collab::folder_view::check_if_view_is_space;
+use crate::biz::collab::folder_view::{
+  check_if_space_is_private, check_if_view_is_space, parse_extra_field_as_json,
+};
 use crate::biz::workspace::page_view::{create_space, update_space};
 use crate::state::AppState;
 
@@ -125,10 +127,17 @@ pub async fn list_workspace_spaces(
   workspace_id: Uuid,
 ) -> Result<SpacesResponseDto, AppError> {
   let folder = state.ws_server.get_folder(workspace_id).await?;
-  let all_views = folder.get_views(uid);
+  let mut space_views = folder.get_views_belong_to(&workspace_id.to_string(), uid);
+  for private_section in folder.get_my_private_sections(uid) {
+    if let Some(pv) = folder.get_view(&private_section.id, uid) {
+      if check_if_view_is_space(&pv) && !space_views.iter().any(|v| v.id == pv.id) {
+        space_views.push(pv);
+      }
+    }
+  }
 
   // Filter views that represent spaces
-  let space_views: Vec<_> = all_views
+  let space_views: Vec<_> = space_views
     .into_iter()
     .filter(|v| check_if_view_is_space(v))
     .collect();
@@ -210,7 +219,7 @@ pub async fn list_workspace_spaces(
     };
 
     let permission = perm_map.remove(&s_id).unwrap_or_else(|| {
-      let is_private = view.is_private;
+      let is_private = check_if_space_is_private(&folder, &view.id);
       SpacePermissionSettingsDto {
         visibility: if is_private { "private".to_string() } else { "public".to_string() },
         owner_access_level: AFAccessLevel::FullAccess,
@@ -243,7 +252,7 @@ pub async fn list_workspace_spaces(
 
     spaces.push(SpaceListItemDto {
       space_id: s_id,
-      name: view.name,
+      name: view.name.clone(),
       permission,
       current_user_access_level,
       explicit_member_count,
@@ -306,7 +315,7 @@ pub async fn get_space_permission(
       if view.is_none() {
         return Err(AppError::RecordNotFound("Space not found".to_string()));
       }
-      let is_private = view.map(|v| v.is_private).unwrap_or(false);
+      let is_private = check_if_space_is_private(&folder, &space_id.to_string());
       SpacePermissionSettingsDto {
         visibility: if is_private { "private".to_string() } else { "public".to_string() },
         owner_access_level: AFAccessLevel::FullAccess,
@@ -441,15 +450,35 @@ pub async fn update_space_permission(
     shared_entity::dto::workspace_dto::SpacePermission::PublicToAll
   };
 
+  let mut folder = state.ws_server.get_folder(workspace_id).await?;
+  let (name, icon, color) = if let Some(view) = folder.get_view(&space_id.to_string(), user.uid) {
+    let extra = view.extra.as_deref().map(parse_extra_field_as_json);
+    let icon = extra
+      .as_ref()
+      .and_then(|e| e.get("space_icon"))
+      .and_then(|v| v.as_str())
+      .unwrap_or("")
+      .to_string();
+    let color = extra
+      .as_ref()
+      .and_then(|e| e.get("space_icon_color"))
+      .and_then(|v| v.as_str())
+      .unwrap_or("")
+      .to_string();
+    (view.name.clone(), icon, color)
+  } else {
+    ("".to_string(), "".to_string(), "".to_string())
+  };
+
   let _ = update_space(
     state,
     user.clone(),
     workspace_id,
     &space_id.to_string(),
     &legacy_perm,
-    "",
-    "",
-    "",
+    &name,
+    &icon,
+    &color,
   )
   .await;
 
@@ -470,10 +499,10 @@ pub async fn update_structured_space(
 
   let mut folder = state.ws_server.get_folder(workspace_id).await?;
   if let Some(view) = folder.get_view(&space_id.to_string(), user.uid) {
-    let name = payload.name.unwrap_or(view.name);
+    let name = payload.name.unwrap_or_else(|| view.name.clone());
     let icon = payload.space_icon.unwrap_or_default();
     let color = payload.space_icon_color.unwrap_or_default();
-    let is_private = view.is_private;
+    let is_private = check_if_space_is_private(&folder, &space_id.to_string());
     let legacy_perm = if is_private {
       shared_entity::dto::workspace_dto::SpacePermission::Private
     } else {
