@@ -187,6 +187,34 @@ pub struct CreateSpaceParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateInitialPageParams {
+  #[serde(default)]
+  pub layout: ViewLayout,
+  pub name: Option<String>,
+  pub view_id: Option<Uuid>,
+  pub database_id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateSpaceV2Params {
+  pub name: String,
+  #[serde(default)]
+  pub space_icon: String,
+  #[serde(default)]
+  pub space_icon_color: String,
+  #[serde(default)]
+  pub space_permission: SpacePermission,
+  pub view_id: Option<Uuid>,
+  pub initial_page: CreateInitialPageParams,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateSpaceV2Response {
+  pub space: Space,
+  pub page: Page,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateSpaceParams {
   pub space_permission: SpacePermission,
   pub name: String,

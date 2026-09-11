@@ -587,10 +587,10 @@ async fn health_check() -> impl Responder {
 }
 
 #[cfg(feature = "use_actix_cors")]
-fn actix_cors_scope() -> actix_cors::Cors {
+fn actix_cors_scope() -> Cors {
   let raw_origins = get_env_var("APPFLOWY_CORS_ALLOWED_ORIGIN", "*");
 
-  let cors = actix_cors::Cors::default()
+  let cors = Cors::default()
     .allow_any_method()
     .allow_any_header()
     .supports_credentials()

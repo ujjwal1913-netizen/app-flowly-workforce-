@@ -450,7 +450,7 @@ pub async fn update_space_permission(
     shared_entity::dto::workspace_dto::SpacePermission::PublicToAll
   };
 
-  let mut folder = state.ws_server.get_folder(workspace_id).await?;
+  let folder = state.ws_server.get_folder(workspace_id).await?;
   let (name, icon, color) = if let Some(view) = folder.get_view(&space_id.to_string(), user.uid) {
     let extra = view.extra.as_deref().map(parse_extra_field_as_json);
     let icon = extra
@@ -497,7 +497,7 @@ pub async fn update_structured_space(
     let _ = update_space_permission(state, user.clone(), workspace_id, space_id, perm).await?;
   }
 
-  let mut folder = state.ws_server.get_folder(workspace_id).await?;
+  let folder = state.ws_server.get_folder(workspace_id).await?;
   if let Some(view) = folder.get_view(&space_id.to_string(), user.uid) {
     let name = payload.name.unwrap_or_else(|| view.name.clone());
     let icon = payload.space_icon.unwrap_or_default();
