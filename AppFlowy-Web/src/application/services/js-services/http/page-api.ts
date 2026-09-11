@@ -25,6 +25,10 @@ import {
 } from '@/application/types';
 import { getErrorMessage, isUnsupportedRouteError } from '@/utils/errors';
 import { Log } from '@/utils/log';
+import {
+  recordStructuredSpacesSupported,
+  recordStructuredSpacesUnsupported,
+} from './spaceCapability';
 
 import { APIResponse, executeAPIRequest, executeAPIVoidRequest, getAxios } from './core';
 
@@ -275,10 +279,13 @@ export async function createSpace(workspaceId: string, payload: CreateSpacePaylo
         assertClientGeneratedId('space', payload.view_id, data.view_id);
       }
 
+      recordStructuredSpacesSupported(workspaceId);
       return data.view_id;
     } catch (error) {
       if (clientGeneratedViewId && payload.view_id && isAlreadyExistsError(error)) return payload.view_id;
       if (!isUnsupportedRouteError(error)) throw error;
+
+      recordStructuredSpacesUnsupported(workspaceId);
 
       const { permission, ...legacyPayload } = payload;
 

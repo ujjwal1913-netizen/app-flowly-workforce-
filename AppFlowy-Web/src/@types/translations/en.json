@@ -3411,6 +3411,7 @@
     "cannotMovePageToDatabase": "Cannot move page to database",
     "switchSpace": "Switch space",
     "spaceNameCannotBeEmpty": "Space name cannot be empty",
+    "structuredSpacesUnsupported": "Custom space permissions are not supported on this server. Please choose Public or Private.",
     "success": {
       "deleteSpace": "Space deleted successfully",
       "renameSpace": "Space renamed successfully",

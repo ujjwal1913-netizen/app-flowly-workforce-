@@ -28,13 +28,18 @@ import SpaceSettingsPanel, { SpaceSettingsTab } from '@/components/app/view-acti
 import {
   defaultEveryoneElseAccessLevel,
   defaultSpacePermissionSettings,
+  LEGACY_SPACE_VISIBILITIES,
   SELECTABLE_SPACE_VISIBILITIES,
 } from '@/components/app/view-actions/spaceVisibilityOptions';
+import {
+  recordStructuredSpacesUnsupported,
+  useStructuredSpacesCapability,
+} from '@/application/services/js-services/http/spaceCapability';
 import { useCurrentUserOptional } from '@/components/main/app.hooks';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
-import { getErrorMessage } from '@/utils/errors';
+import { getErrorMessage, isUnsupportedRouteError } from '@/utils/errors';
 
 const DEFAULT_SPACE_VISIBILITY = SpaceVisibility.Public;
 const DRAFT_EXCLUDED_ROLES = [Role.Owner];
@@ -161,6 +166,7 @@ function CreateSpaceModal({
   const { t } = useTranslation();
   const { createSpace, createSpaceWithInitialPage } = useAppOperations();
   const workspaceId = useCurrentWorkspaceId();
+  const { isLegacyServer } = useStructuredSpacesCapability(workspaceId);
   const userWorkspaceInfo = useUserWorkspaceInfo();
   const currentUser = useCurrentUserOptional();
   const [tab, setTab] = useState<SpaceSettingsTab>('general');
@@ -170,6 +176,12 @@ function CreateSpaceModal({
   const [permissionSettings, setPermissionSettings] = useState<SpacePermissionSettings>(() =>
     defaultSpacePermissionSettings(DEFAULT_SPACE_VISIBILITY)
   );
+
+  useEffect(() => {
+    if (isLegacyServer && permissionSettings.visibility === SpaceVisibility.Custom) {
+      setPermissionSettings(defaultSpacePermissionSettings(SpaceVisibility.Public));
+    }
+  }, [isLegacyServer, permissionSettings.visibility]);
   const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMember[]>([]);
   const [loadedWorkspaceMemberDirectoryId, setLoadedWorkspaceMemberDirectoryId] = useState<string | null>(null);
   const [loadingWorkspaceMembers, setLoadingWorkspaceMembers] = useState(false);
@@ -593,7 +605,13 @@ function CreateSpaceModal({
         }
       }
 
-      notify.error(getErrorMessage(error));
+      if (isUnsupportedRouteError(error)) {
+        if (workspaceId) recordStructuredSpacesUnsupported(workspaceId);
+        notify.error(t('space.structuredSpacesUnsupported'));
+        setPermissionSettings(defaultSpacePermissionSettings(SpaceVisibility.Public));
+      } else {
+        notify.error(getErrorMessage(error));
+      }
     } finally {
       creatingRef.current = false;
       setLoading(false);
@@ -623,7 +641,7 @@ function CreateSpaceModal({
       modalTestId='create-space-modal'
       activeTab={tab}
       onTabChange={setTab}
-      membersTabVisible
+      membersTabVisible={!isLegacyServer}
       membersTabDisabled={false}
       membersContent={
         <div className='appflowy-scroller max-h-[min(58vh,calc(100vh-220px))] overflow-y-auto py-2 pr-1'>
@@ -699,8 +717,9 @@ function CreateSpaceModal({
       onSpaceNameChange={setSpaceName}
       onSpaceIconChange={handleSpaceIconChange}
       permissionSettings={permissionSettings}
-      visibilityOptions={SELECTABLE_SPACE_VISIBILITIES}
+      visibilityOptions={isLegacyServer ? LEGACY_SPACE_VISIBILITIES : SELECTABLE_SPACE_VISIBILITIES}
       permissionSettingsDisabled={memberControlsDisabled}
+      showAccessDetails={isLegacyServer ? (permissionSettings.visibility === SpaceVisibility.Private) : true}
       workspaceName={workspaceName}
       privateOwner={privateOwner}
       onVisibilitySelect={handleVisibilitySelect}

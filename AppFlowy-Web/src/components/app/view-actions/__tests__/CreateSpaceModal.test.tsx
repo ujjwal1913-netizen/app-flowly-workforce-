@@ -11,6 +11,11 @@ import {
   ViewLayout,
   WorkspaceMember,
 } from '@/application/types';
+import {
+  clearStructuredSpacesCapabilityCache,
+  recordStructuredSpacesSupported,
+  recordStructuredSpacesUnsupported,
+} from '@/application/services/js-services/http/spaceCapability';
 import { notify } from '@/components/_shared/notify';
 import CreateSpaceModal from '@/components/app/view-actions/CreateSpaceModal';
 
@@ -21,6 +26,7 @@ const mockCreateSpaceWithInitialPage = jest.fn();
 const mockGetMembers = jest.fn();
 const mockGetSpacePermission = jest.fn();
 const mockAddSpaceMember = jest.fn();
+const mockGetSpaces = jest.fn();
 const mockMoveToTrash = jest.fn();
 const mockDeleteTrash = jest.fn();
 
@@ -78,6 +84,7 @@ jest.mock('@/application/services/domains', () => ({
     getMembers: (...args: unknown[]) => mockGetMembers(...args),
     getSpacePermission: (...args: unknown[]) => mockGetSpacePermission(...args),
     addSpaceMember: (...args: unknown[]) => mockAddSpaceMember(...args),
+    getSpaces: (...args: unknown[]) => mockGetSpaces(...args),
   },
 }));
 
@@ -290,6 +297,9 @@ jest.mock('@/components/ui/tabs', () => {
 describe('CreateSpaceModal draft controller', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    clearStructuredSpacesCapabilityCache();
+    recordStructuredSpacesSupported('workspace-1');
+    mockGetSpaces.mockResolvedValue([]);
     mockGetMembers.mockResolvedValue([candidateOne, candidateTwo]);
     mockGetSpacePermission.mockRejectedValue({ code: -2, httpStatus: 404, message: 'Space not found' });
     mockCreateSpace.mockResolvedValue('space-id');
@@ -942,5 +952,36 @@ describe('CreateSpaceModal draft controller', () => {
     expect(mockCreateSpace).not.toHaveBeenCalled();
     expect(mockCreateSpaceWithInitialPage).not.toHaveBeenCalled();
     expect(mockAddSpaceMember).not.toHaveBeenCalled();
+  });
+
+  describe('legacy server compatibility', () => {
+    it('restricts visibility options to Public and Private and hides Custom on legacy servers', async () => {
+      recordStructuredSpacesUnsupported('workspace-1');
+      render(<CreateSpaceModal open onClose={jest.fn()} />);
+
+      expect(screen.getByTestId('manage-space-visibility-option-public')).toBeTruthy();
+      expect(screen.getByTestId('manage-space-visibility-option-private')).toBeTruthy();
+      expect(screen.queryByTestId('manage-space-visibility-option-custom')).toBeNull();
+      expect(screen.queryByRole('tab', { name: 'space.permissionManager.membersTab' })).toBeNull();
+    });
+
+    it('shields 404 route errors on space creation and displays a friendly error notification', async () => {
+      const unsupportedError = {
+        isAxiosError: true,
+        response: { status: 404, data: { message: 'Route not found' } },
+        message: 'Request failed with status code 404',
+      };
+      mockCreateSpace.mockRejectedValueOnce(unsupportedError);
+
+      render(<CreateSpaceModal open onClose={jest.fn()} />);
+
+      enterSpaceName('New Project');
+      fireEvent.click(screen.getByTestId('create-space-submit'));
+
+      await waitFor(() => {
+        expect(notify.error).toHaveBeenCalledWith('space.structuredSpacesUnsupported');
+      });
+      expect(notify.error).not.toHaveBeenCalledWith('Request failed with status code 404');
+    });
   });
 });

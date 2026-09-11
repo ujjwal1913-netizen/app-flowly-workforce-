@@ -4,6 +4,10 @@ import { APP_EVENTS } from '@/application/constants';
 import { WorkspaceService } from '@/application/services/domains';
 import { View } from '@/application/types';
 import { useCurrentWorkspaceId, useEventEmitter } from '@/components/app/app.hooks';
+import {
+  recordStructuredSpacesSupported,
+  recordStructuredSpacesUnsupported,
+} from '@/application/services/js-services/http/spaceCapability';
 import { isUnsupportedRouteError } from '@/utils/errors';
 
 interface LoadedSpaceActionPermissions {
@@ -59,6 +63,7 @@ export function useSpaceActionPermissions(view: View | null | undefined, opened:
     void WorkspaceService.getSpacePermission(workspaceId, viewId)
       .then((permission) => {
         if (!isCurrentRequest()) return;
+        recordStructuredSpacesSupported(workspaceId);
         setLoadedPermissions({
           workspaceId,
           viewId,
@@ -68,7 +73,11 @@ export function useSpaceActionPermissions(view: View | null | undefined, opened:
       .catch((error) => {
         if (!isCurrentRequest()) return;
 
-        if (!isUnsupportedRouteError(error)) console.error(error);
+        if (isUnsupportedRouteError(error)) {
+          recordStructuredSpacesUnsupported(workspaceId);
+        } else {
+          console.error(error);
+        }
         setLoadedPermissions({
           workspaceId,
           viewId,

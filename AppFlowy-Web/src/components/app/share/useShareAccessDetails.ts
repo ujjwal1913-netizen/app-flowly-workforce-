@@ -17,6 +17,10 @@ import { useAppOutline, useCurrentWorkspaceId, useEventEmitter, useUserWorkspace
 import { resolveCurrentUserAccessLevel } from '@/components/app/share/shareAccessLevel';
 import { resolveShareSectionType, ShareSectionType } from '@/components/app/share/shareSectionType';
 import { useCurrentUser } from '@/components/main/app.hooks';
+import {
+  recordStructuredSpacesSupported,
+  recordStructuredSpacesUnsupported,
+} from '@/application/services/js-services/http/spaceCapability';
 import { isUnsupportedRouteError } from '@/utils/errors';
 
 const ACCESS_DETAILS_MAX_TRANSIENT_RETRIES = 1;
@@ -238,6 +242,7 @@ export function useShareAccessDetails(viewId: string, opened: boolean) {
         fullAccessAuthorityContext.kind === 'space'
           ? WorkspaceService.getSpacePermission(currentWorkspaceId, fullAccessAuthorityContext.spaceId)
               .then((permission) => {
+                recordStructuredSpacesSupported(currentWorkspaceId);
                 const visibility = normalizeKnownLegacySpaceVisibility(permission.permission.visibility);
                 const usesStructuredManagementCapability =
                   visibility === SpaceVisibility.Private || visibility === SpaceVisibility.Custom;
@@ -250,14 +255,16 @@ export function useShareAccessDetails(viewId: string, opened: boolean) {
                   generalAccessLevel: resolveStructuredGeneralAccessLevel(permission.permission),
                 };
               })
-              .catch((error) =>
-                isUnsupportedRouteError(error)
-                  ? {
-                      canManage: fullAccessAuthorityContext.publicCanManage,
-                      acceptsLegacyCreatorSignals: true,
-                    }
-                  : { canManage: false, acceptsLegacyCreatorSignals: false }
-              )
+              .catch((error) => {
+                if (isUnsupportedRouteError(error)) {
+                  recordStructuredSpacesUnsupported(currentWorkspaceId);
+                  return {
+                    canManage: fullAccessAuthorityContext.publicCanManage,
+                    acceptsLegacyCreatorSignals: true,
+                  };
+                }
+                return { canManage: false, acceptsLegacyCreatorSignals: false };
+              })
           : Promise.resolve({
               canManage: fullAccessAuthorityContext.kind === 'public' ? fullAccessAuthorityContext.canManage : false,
               acceptsLegacyCreatorSignals: fullAccessAuthorityContext.kind === 'public',

@@ -51,6 +51,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Progress } from '@/components/ui/progress';
+import { recordStructuredSpacesUnsupported } from '@/application/services/js-services/http/spaceCapability';
 import { getErrorMessage, isUnsupportedRouteError } from '@/utils/errors';
 
 import type { TFunction } from 'i18next';
@@ -679,6 +680,9 @@ function ManageSpace({ open, onClose, viewId }: { open: boolean; onClose: () => 
         shouldLoadSpaceMembers = hasEditableRoster && permission.can_manage_members;
       } catch (error) {
         if (isCurrentSettingsRequest()) {
+          if (isUnsupportedRouteError(error)) {
+            recordStructuredSpacesUnsupported(workspaceId);
+          }
           // The structured capability response is the authority for this
           // dialog. An unavailable/unsupported route must never manufacture
           // management rights from the legacy binary space model.

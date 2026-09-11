@@ -50,6 +50,7 @@ import {
   resolvePermissionProbeTarget,
   type PermissionProbeTarget,
 } from './permissionProbe';
+import { checkStructuredSpacesSupported } from '@/application/services/js-services/http/spaceCapability';
 
 interface AppBusinessLayerProps {
   children: ReactNode;
@@ -173,6 +174,12 @@ export const AppBusinessLayer: FC<AppBusinessLayerProps> = ({ children }) => {
   const { revertCollabVersion } = syncContext;
   const params = useParams();
   const [searchParams] = useSearchParams();
+
+  useEffect(() => {
+    if (currentWorkspaceId) {
+      void checkStructuredSpacesSupported(currentWorkspaceId);
+    }
+  }, [currentWorkspaceId]);
 
   // UI state
   const [rendered, setRendered] = useState(false);
