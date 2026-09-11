@@ -243,12 +243,34 @@ pub fn workspace_scope() -> Scope {
     )
     .service(
       web::resource("/{workspace_id}/view/{view_id}")
-        .route(web::get().to(get_page_view_handler))
+        .route(web::get().to(get_workspace_view_structure_handler))
         .route(web::patch().to(update_page_view_handler)),
     )
     .service(
       web::resource("/{workspace_id}/view/{view_id}/navigation")
-        .route(web::get().to(get_page_view_handler)),
+        .route(web::get().to(get_workspace_view_structure_handler)),
+    )
+    .service(
+      web::resource("/{workspace_id}/views")
+        .route(web::get().to(get_views_batch_handler))
+        .route(web::post().to(post_views_batch_handler)),
+    )
+    .service(
+      web::resource("/{workspace_id}/collab/{object_id}/collab-exists")
+        .route(web::get().to(get_collab_exists_handler)),
+    )
+    .service(
+      web::resource("/{workspace_id}/workspace-profile")
+        .route(web::get().to(get_workspace_member_profile_handler)),
+    )
+    .service(
+      web::resource("/{workspace_id}/groups")
+        .route(web::get().to(list_workspace_groups_stub_handler))
+        .route(web::post().to(list_workspace_groups_stub_handler)),
+    )
+    .service(
+      web::resource("/{workspace_id}/views/{view_id}/group")
+        .route(web::get().to(list_workspace_groups_stub_handler)),
     )
     .service(
       web::resource("/{workspace_id}/notifications/unread-count")
@@ -257,6 +279,22 @@ pub fn workspace_scope() -> Scope {
     .service(
       web::resource("/{workspace_id}/notifications")
         .route(web::get().to(list_notifications_handler)),
+    )
+    .service(
+      web::resource("/{workspace_id}/notifications/read")
+        .route(web::post().to(ok_action_handler)),
+    )
+    .service(
+      web::resource("/{workspace_id}/notifications/read-all")
+        .route(web::post().to(ok_action_handler)),
+    )
+    .service(
+      web::resource("/{workspace_id}/notifications/archive")
+        .route(web::post().to(ok_action_handler)),
+    )
+    .service(
+      web::resource("/{workspace_id}/notifications/archive-all")
+        .route(web::post().to(ok_action_handler)),
     )
     .service(
       web::resource("/{workspace_id}/collab/{object_id}/permission")
@@ -2817,11 +2855,18 @@ async fn get_workspace_publish_outline_handler(
   Ok(Json(AppResponse::Ok().with_data(published_view)))
 }
 
+#[derive(Deserialize, Debug, Default)]
+pub struct ListDatabaseQuery {
+  pub offset: Option<usize>,
+  pub limit: Option<usize>,
+}
+
 async fn list_database_handler(
   user_uuid: UserUuid,
   workspace_id: web::Path<Uuid>,
+  query: web::Query<ListDatabaseQuery>,
   state: Data<AppState>,
-) -> Result<Json<AppResponse<Vec<AFDatabase>>>> {
+) -> Result<Json<AppResponse<serde_json::Value>>> {
   let uid = state.user_cache.get_user_uid(&user_uuid).await?;
   let workspace_id = workspace_id.into_inner();
   let dbs = biz::collab::ops::list_database(
@@ -2832,7 +2877,42 @@ async fn list_database_handler(
     workspace_id,
   )
   .await?;
-  Ok(Json(AppResponse::Ok().with_data(dbs)))
+
+  if query.offset.is_some() || query.limit.is_some() {
+    let mapped_databases: Vec<serde_json::Value> = dbs
+      .into_iter()
+      .map(|db| {
+        let mapped_views: Vec<serde_json::Value> = db
+          .views
+          .into_iter()
+          .map(|v| {
+            serde_json::json!({
+              "view_id": v.view_id,
+              "name": v.name,
+              "icon": v.icon,
+              "layout": v.layout,
+              "is_container": false,
+              "embedded": false,
+              "parent_view_id": null,
+            })
+          })
+          .collect();
+
+        serde_json::json!({
+          "id": db.id,
+          "database_id": db.id,
+          "views": mapped_views,
+        })
+      })
+      .collect();
+
+    Ok(Json(AppResponse::Ok().with_data(serde_json::json!({
+      "databases": mapped_databases,
+      "has_more": false,
+    }))))
+  } else {
+    Ok(Json(AppResponse::Ok().with_data(serde_json::to_value(&dbs).map_err(AppResponseError::from)?)))
+  }
 }
 
 async fn list_database_row_id_handler(
@@ -3340,6 +3420,245 @@ async fn list_notifications_handler() -> Result<Json<AppResponse<serde_json::Val
   Ok(Json(AppResponse::Ok().with_data(serde_json::json!({ "notifications": [], "has_more": false }))))
 }
 
-async fn get_collab_permission_handler() -> Result<Json<AppResponse<serde_json::Value>>> {
-  Ok(Json(AppResponse::Ok().with_data(serde_json::json!({ "access_level": 4, "role": 3 }))))
+pub(crate) async fn get_workspace_view_structure_handler(
+  user_uuid: UserUuid,
+  path: web::Path<(Uuid, Uuid)>,
+  state: Data<AppState>,
+  query: web::Query<QueryWorkspaceFolder>,
+  req: HttpRequest,
+) -> Result<Json<AppResponse<FolderView>>> {
+  let depth = query.depth.unwrap_or(1).min(10);
+  let uid = state.user_cache.get_user_uid(&user_uuid).await?;
+  let user = realtime_user_for_web_request(req.headers(), uid)?;
+  let (workspace_id, view_id) = path.into_inner();
+
+  state
+    .workspace_access_control
+    .enforce_role_weak(&uid, &workspace_id, AFRole::Member)
+    .await?;
+
+  let structure_result = biz::collab::ops::get_user_workspace_structure(
+    &state,
+    user.clone(),
+    workspace_id,
+    depth,
+    &view_id,
+  )
+  .await;
+
+  match structure_result {
+    Ok(folder_view) => Ok(Json(AppResponse::Ok().with_data(folder_view))),
+    Err(e) => {
+      match biz::workspace::page_view::get_page_view_collab(
+        &state.pg_pool,
+        &state.collab_storage,
+        &state.ws_server,
+        uid,
+        workspace_id,
+        view_id,
+      )
+      .await
+      {
+        Ok(page_collab) => Ok(Json(AppResponse::Ok().with_data(page_collab.view))),
+        Err(_) => Err(e.into()),
+      }
+    }
+  }
+}
+
+#[derive(Deserialize, Debug)]
+pub struct GetViewsBatchQuery {
+  pub depth: Option<u32>,
+  pub view_ids: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct PostViewsBatchPayload {
+  pub depth: Option<u32>,
+  pub view_ids: Vec<Uuid>,
+}
+
+async fn get_views_batch_handler(
+  user_uuid: UserUuid,
+  path: web::Path<Uuid>,
+  query: web::Query<GetViewsBatchQuery>,
+  state: Data<AppState>,
+  req: HttpRequest,
+) -> Result<Json<AppResponse<serde_json::Value>>> {
+  let workspace_id = path.into_inner();
+  let depth = query.depth.unwrap_or(1).min(10);
+  let uid = state.user_cache.get_user_uid(&user_uuid).await?;
+  let user = realtime_user_for_web_request(req.headers(), uid)?;
+
+  state
+    .workspace_access_control
+    .enforce_role_weak(&uid, &workspace_id, AFRole::Member)
+    .await?;
+
+  let view_ids: Vec<Uuid> = query
+    .view_ids
+    .as_deref()
+    .unwrap_or("")
+    .split(',')
+    .filter_map(|s| Uuid::parse_str(s.trim()).ok())
+    .collect();
+
+  let mut views = Vec::new();
+  for vid in view_ids {
+    let fv = match biz::collab::ops::get_user_workspace_structure(
+      &state,
+      user.clone(),
+      workspace_id,
+      depth,
+      &vid,
+    )
+    .await
+    {
+      Ok(fv) => Some(fv),
+      Err(_) => {
+        biz::workspace::page_view::get_page_view_collab(
+          &state.pg_pool,
+          &state.collab_storage,
+          &state.ws_server,
+          uid,
+          workspace_id,
+          vid,
+        )
+        .await
+        .ok()
+        .map(|pc| pc.view)
+      }
+    };
+    if let Some(view) = fv {
+      views.push(view);
+    }
+  }
+
+  Ok(Json(AppResponse::Ok().with_data(serde_json::json!({ "views": views }))))
+}
+
+async fn post_views_batch_handler(
+  user_uuid: UserUuid,
+  path: web::Path<Uuid>,
+  payload: Json<PostViewsBatchPayload>,
+  state: Data<AppState>,
+  req: HttpRequest,
+) -> Result<Json<AppResponse<serde_json::Value>>> {
+  let workspace_id = path.into_inner();
+  let depth = payload.depth.unwrap_or(1).min(10);
+  let uid = state.user_cache.get_user_uid(&user_uuid).await?;
+  let user = realtime_user_for_web_request(req.headers(), uid)?;
+
+  state
+    .workspace_access_control
+    .enforce_role_weak(&uid, &workspace_id, AFRole::Member)
+    .await?;
+
+  let mut views = Vec::new();
+  for vid in &payload.view_ids {
+    let fv = match biz::collab::ops::get_user_workspace_structure(
+      &state,
+      user.clone(),
+      workspace_id,
+      depth,
+      vid,
+    )
+    .await
+    {
+      Ok(fv) => Some(fv),
+      Err(_) => {
+        biz::workspace::page_view::get_page_view_collab(
+          &state.pg_pool,
+          &state.collab_storage,
+          &state.ws_server,
+          uid,
+          workspace_id,
+          *vid,
+        )
+        .await
+        .ok()
+        .map(|pc| pc.view)
+      }
+    };
+    if let Some(view) = fv {
+      views.push(view);
+    }
+  }
+
+  Ok(Json(AppResponse::Ok().with_data(serde_json::json!({ "views": views }))))
+}
+
+#[derive(Deserialize, Debug)]
+pub struct CollabPermissionQuery {
+  pub collab_type: Option<i32>,
+}
+
+async fn get_collab_permission_handler(
+  user_uuid: UserUuid,
+  path: web::Path<(Uuid, Uuid)>,
+  query: web::Query<CollabPermissionQuery>,
+  state: Data<AppState>,
+) -> Result<Json<AppResponse<serde_json::Value>>> {
+  let uid = state.user_cache.get_user_uid(&user_uuid).await?;
+  let (workspace_id, object_id) = path.into_inner();
+  let collab_type = query.collab_type.unwrap_or(0);
+
+  let is_owner = sqlx::query_scalar::<_, i64>(
+    r#"SELECT COUNT(*) FROM af_workspace WHERE workspace_id = $1 AND owner_uid = $2"#,
+  )
+  .bind(workspace_id)
+  .bind(uid)
+  .fetch_one(&state.pg_pool)
+  .await
+  .unwrap_or(0)
+    > 0;
+
+  let access_level = if is_owner { 50 } else { 30 };
+
+  Ok(Json(AppResponse::Ok().with_data(serde_json::json!({
+    "object_id": object_id.to_string(),
+    "collab_type": collab_type,
+    "governing_view_id": object_id.to_string(),
+    "access_level": access_level,
+    "can_read": true,
+    "can_write": true,
+    "can_comment": true,
+    "can_share": is_owner,
+  }))))
+}
+
+async fn get_collab_exists_handler(
+  path: web::Path<(Uuid, Uuid)>,
+  state: Data<AppState>,
+) -> Result<Json<AppResponse<serde_json::Value>>> {
+  let (_workspace_id, object_id) = path.into_inner();
+  let exists = database::collab::is_collab_exists(&object_id, &state.pg_pool)
+    .await
+    .unwrap_or(false);
+  Ok(Json(AppResponse::Ok().with_data(serde_json::json!({ "exists": exists }))))
+}
+
+async fn get_workspace_member_profile_handler(
+  user_uuid: UserUuid,
+  state: Data<AppState>,
+  path: web::Path<Uuid>,
+) -> Result<JsonAppResponse<MentionablePerson>> {
+  let workspace_id = path.into_inner();
+  let uid = state.user_cache.get_user_uid(&user_uuid).await?;
+  state
+    .workspace_access_control
+    .enforce_role_weak(&uid, &workspace_id, AFRole::Guest)
+    .await?;
+  let person =
+    workspace::ops::get_workspace_mentionable_person(&state.pg_pool, &workspace_id, &user_uuid)
+      .await?;
+  Ok(AppResponse::Ok().with_data(person).into())
+}
+
+async fn list_workspace_groups_stub_handler() -> Result<Json<AppResponse<serde_json::Value>>> {
+  Ok(Json(AppResponse::Ok().with_data(serde_json::json!({ "groups": [] }))))
+}
+
+async fn ok_action_handler() -> Result<Json<AppResponse<()>>> {
+  Ok(Json(AppResponse::Ok()))
 }

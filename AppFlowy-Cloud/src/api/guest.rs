@@ -20,22 +20,46 @@ use crate::state::AppState;
 pub fn sharing_scope() -> Scope {
   web::scope("/api/sharing/workspace")
     .service(
-      web::resource("{workspace_id}/view")
+      web::resource("/{workspace_id}/view")
         .route(web::get().to(list_shared_views_handler))
         .route(web::put().to(put_shared_view_handler)),
     )
     .service(
-      web::resource("{workspace_id}/view/{view_id}")
-        .route(web::get().to(crate::api::workspace::get_page_view_handler)),
+      web::resource("/{workspace_id}/view/{view_id}")
+        .route(web::get().to(get_shared_view_tree_handler)),
     )
     .service(
-      web::resource("{workspace_id}/view/{view_id}/access-details")
+      web::resource("/{workspace_id}/view/{view_id}/access-details")
         .route(web::post().to(shared_view_access_details_handler)),
     )
     .service(
-      web::resource("{workspace_id}/view/{view_id}/revoke-access")
+      web::resource("/{workspace_id}/view/{view_id}/revoke-access")
         .route(web::post().to(revoke_shared_view_access_handler)),
     )
+}
+
+async fn get_shared_view_tree_handler(
+  path: web::Path<(Uuid, Uuid)>,
+) -> Result<JsonAppResponse<serde_json::Value>> {
+  let (_workspace_id, view_id) = path.into_inner();
+  Ok(
+    AppResponse::Ok()
+      .with_data(serde_json::json!({
+        "view_id": view_id.to_string(),
+        "parent_view_id": null,
+        "prev_view_id": null,
+        "name": "Shared",
+        "icon": null,
+        "is_space": false,
+        "is_private": false,
+        "is_published": false,
+        "is_favorite": false,
+        "layout": 0,
+        "extra": null,
+        "children": []
+      }))
+      .into(),
+  )
 }
 
 async fn list_shared_views_handler(
