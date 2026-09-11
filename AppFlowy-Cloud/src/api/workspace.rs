@@ -1603,7 +1603,7 @@ async fn patch_space_member_handler(
     .await?;
   let target_uid = target_uid_str
     .parse::<i64>()
-    .map_err(|e| AppError::InvalidParams(format!("Invalid target uid: {}", e)))?;
+    .map_err(|e| AppError::Unhandled(format!("Invalid target uid: {}", e)))?;
   let member = workspace::space::update_space_member(&state, workspace_uuid, space_id, target_uid, payload.into_inner()).await?;
   Ok(Json(AppResponse::Ok().with_data(member)))
 }
@@ -1621,7 +1621,7 @@ async fn delete_space_member_handler(
     .await?;
   let target_uid = target_uid_str
     .parse::<i64>()
-    .map_err(|e| AppError::InvalidParams(format!("Invalid target uid: {}", e)))?;
+    .map_err(|e| AppError::Unhandled(format!("Invalid target uid: {}", e)))?;
   workspace::space::remove_space_member(&state, workspace_uuid, space_id, target_uid).await?;
   Ok(Json(AppResponse::Ok()))
 }

@@ -2,14 +2,15 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use app_error::AppError;
-use appflowy_collaborate::realtime_user::RealtimeUser;
-use database_entity::dto::{AFAccessLevel, AFRole};
+use appflowy_collaborate::ws2::WorkspaceCollabInstanceCache;
+use collab_rt_entity::user::RealtimeUser;
+use database_entity::dto::AFAccessLevel;
 use shared_entity::dto::workspace_dto::{
   AddSpaceMemberParams, CreateStructuredSpaceParams, Space, SpaceListItemDto, SpaceMemberDto,
   SpaceMembersResponseDto, SpacePermissionResponseDto, SpacePermissionSettingsDto, SpaceSecuritySettingsDto,
   SpacesResponseDto, UpdateSpaceMemberParams, UpdateStructuredSpaceParams,
 };
-use sqlx::{PgPool, Row};
+use sqlx::Row;
 
 use crate::biz::collab::folder_view::check_if_view_is_space;
 use crate::biz::workspace::page_view::{create_space, update_space};
@@ -639,12 +640,13 @@ pub async fn update_space_member(
     sqlx::query(
       r#"
       UPDATE af_space_member SET role = $1, updated_at = CURRENT_TIMESTAMP
-      WHERE space_id = $2 AND uid = $3
+      WHERE space_id = $2 AND uid = $3 AND workspace_id = $4
       "#,
     )
     .bind(role)
     .bind(space_id)
     .bind(target_uid)
+    .bind(workspace_id)
     .execute(&state.pg_pool)
     .await?;
   }
@@ -653,12 +655,13 @@ pub async fn update_space_member(
     sqlx::query(
       r#"
       UPDATE af_space_member SET access_level = $1, updated_at = CURRENT_TIMESTAMP
-      WHERE space_id = $2 AND uid = $3
+      WHERE space_id = $2 AND uid = $3 AND workspace_id = $4
       "#,
     )
     .bind(level as i32)
     .bind(space_id)
     .bind(target_uid)
+    .bind(workspace_id)
     .execute(&state.pg_pool)
     .await?;
 
@@ -675,11 +678,12 @@ pub async fn update_space_member(
     JOIN af_user u ON m.uid = u.uid
     LEFT JOIN af_workspace_member wm ON wm.uid = m.uid AND wm.workspace_id = m.workspace_id
     LEFT JOIN af_roles r ON wm.role_id = r.id
-    WHERE m.space_id = $1 AND m.uid = $2
+    WHERE m.space_id = $1 AND m.uid = $2 AND m.workspace_id = $3
     "#,
   )
   .bind(space_id)
   .bind(target_uid)
+  .bind(workspace_id)
   .fetch_one(&state.pg_pool)
   .await?;
 
