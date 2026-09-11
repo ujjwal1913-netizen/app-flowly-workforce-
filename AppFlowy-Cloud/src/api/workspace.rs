@@ -206,6 +206,30 @@ pub fn workspace_scope() -> Scope {
       web::resource("/{workspace_id}/space/{view_id}").route(web::patch().to(update_space_handler)),
     )
     .service(
+      web::resource("/{workspace_id}/spaces")
+        .route(web::post().to(post_spaces_handler))
+        .route(web::get().to(list_spaces_handler)),
+    )
+    .service(
+      web::resource("/{workspace_id}/spaces/{space_id}")
+        .route(web::patch().to(patch_structured_space_handler)),
+    )
+    .service(
+      web::resource("/{workspace_id}/spaces/{space_id}/permission")
+        .route(web::get().to(get_space_permission_handler))
+        .route(web::patch().to(patch_space_permission_handler)),
+    )
+    .service(
+      web::resource("/{workspace_id}/spaces/{space_id}/members")
+        .route(web::get().to(get_space_members_handler))
+        .route(web::post().to(post_space_member_handler)),
+    )
+    .service(
+      web::resource("/{workspace_id}/spaces/{space_id}/members/{target_uid}")
+        .route(web::patch().to(patch_space_member_handler))
+        .route(web::delete().to(delete_space_member_handler)),
+    )
+    .service(
       web::resource("/{workspace_id}/folder-view").route(web::post().to(post_folder_view_handler)),
     )
     .service(
@@ -1447,6 +1471,158 @@ async fn update_space_handler(
     &payload.space_icon_color,
   )
   .await?;
+  Ok(Json(AppResponse::Ok()))
+}
+
+async fn post_spaces_handler(
+  user_uuid: UserUuid,
+  path: web::Path<Uuid>,
+  payload: Json<CreateStructuredSpaceParams>,
+  state: Data<AppState>,
+  req: HttpRequest,
+) -> Result<Json<AppResponse<Space>>> {
+  let uid = state.user_cache.get_user_uid(&user_uuid).await?;
+  let workspace_uuid = path.into_inner();
+  state
+    .workspace_access_control
+    .enforce_action(&uid, &workspace_uuid, Action::Write)
+    .await?;
+  let user = realtime_user_for_web_request(req.headers(), uid)?;
+  let space = workspace::space::create_structured_space(&state, user, workspace_uuid, payload.into_inner()).await?;
+  Ok(Json(AppResponse::Ok().with_data(space)))
+}
+
+async fn list_spaces_handler(
+  user_uuid: UserUuid,
+  path: web::Path<Uuid>,
+  state: Data<AppState>,
+) -> Result<Json<AppResponse<SpacesResponseDto>>> {
+  let uid = state.user_cache.get_user_uid(&user_uuid).await?;
+  let workspace_uuid = path.into_inner();
+  state
+    .workspace_access_control
+    .enforce_role_weak(&uid, &workspace_uuid, AFRole::Guest)
+    .await?;
+  let spaces = workspace::space::list_workspace_spaces(&state, uid, workspace_uuid).await?;
+  Ok(Json(AppResponse::Ok().with_data(spaces)))
+}
+
+async fn patch_structured_space_handler(
+  user_uuid: UserUuid,
+  path: web::Path<(Uuid, Uuid)>,
+  payload: Json<UpdateStructuredSpaceParams>,
+  state: Data<AppState>,
+  req: HttpRequest,
+) -> Result<Json<AppResponse<Space>>> {
+  let uid = state.user_cache.get_user_uid(&user_uuid).await?;
+  let (workspace_uuid, space_id) = path.into_inner();
+  state
+    .workspace_access_control
+    .enforce_action(&uid, &workspace_uuid, Action::Write)
+    .await?;
+  let user = realtime_user_for_web_request(req.headers(), uid)?;
+  let space = workspace::space::update_structured_space(&state, user, workspace_uuid, space_id, payload.into_inner()).await?;
+  Ok(Json(AppResponse::Ok().with_data(space)))
+}
+
+async fn get_space_permission_handler(
+  user_uuid: UserUuid,
+  path: web::Path<(Uuid, Uuid)>,
+  state: Data<AppState>,
+) -> Result<Json<AppResponse<SpacePermissionResponseDto>>> {
+  let uid = state.user_cache.get_user_uid(&user_uuid).await?;
+  let (workspace_uuid, space_id) = path.into_inner();
+  state
+    .workspace_access_control
+    .enforce_role_weak(&uid, &workspace_uuid, AFRole::Guest)
+    .await?;
+  let perm = workspace::space::get_space_permission(&state, uid, workspace_uuid, space_id).await?;
+  Ok(Json(AppResponse::Ok().with_data(perm)))
+}
+
+async fn patch_space_permission_handler(
+  user_uuid: UserUuid,
+  path: web::Path<(Uuid, Uuid)>,
+  payload: Json<SpacePermissionSettingsDto>,
+  state: Data<AppState>,
+  req: HttpRequest,
+) -> Result<Json<AppResponse<SpacePermissionResponseDto>>> {
+  let uid = state.user_cache.get_user_uid(&user_uuid).await?;
+  let (workspace_uuid, space_id) = path.into_inner();
+  state
+    .workspace_access_control
+    .enforce_action(&uid, &workspace_uuid, Action::Write)
+    .await?;
+  let user = realtime_user_for_web_request(req.headers(), uid)?;
+  let perm = workspace::space::update_space_permission(&state, user, workspace_uuid, space_id, payload.into_inner()).await?;
+  Ok(Json(AppResponse::Ok().with_data(perm)))
+}
+
+async fn get_space_members_handler(
+  user_uuid: UserUuid,
+  path: web::Path<(Uuid, Uuid)>,
+  state: Data<AppState>,
+) -> Result<Json<AppResponse<SpaceMembersResponseDto>>> {
+  let uid = state.user_cache.get_user_uid(&user_uuid).await?;
+  let (workspace_uuid, space_id) = path.into_inner();
+  state
+    .workspace_access_control
+    .enforce_role_weak(&uid, &workspace_uuid, AFRole::Guest)
+    .await?;
+  let members = workspace::space::get_space_members(&state, workspace_uuid, space_id).await?;
+  Ok(Json(AppResponse::Ok().with_data(members)))
+}
+
+async fn post_space_member_handler(
+  user_uuid: UserUuid,
+  path: web::Path<(Uuid, Uuid)>,
+  payload: Json<AddSpaceMemberParams>,
+  state: Data<AppState>,
+) -> Result<Json<AppResponse<SpaceMemberDto>>> {
+  let uid = state.user_cache.get_user_uid(&user_uuid).await?;
+  let (workspace_uuid, space_id) = path.into_inner();
+  state
+    .workspace_access_control
+    .enforce_action(&uid, &workspace_uuid, Action::Write)
+    .await?;
+  let member = workspace::space::add_space_member(&state, workspace_uuid, space_id, payload.into_inner()).await?;
+  Ok(Json(AppResponse::Ok().with_data(member)))
+}
+
+async fn patch_space_member_handler(
+  user_uuid: UserUuid,
+  path: web::Path<(Uuid, Uuid, String)>,
+  payload: Json<UpdateSpaceMemberParams>,
+  state: Data<AppState>,
+) -> Result<Json<AppResponse<SpaceMemberDto>>> {
+  let uid = state.user_cache.get_user_uid(&user_uuid).await?;
+  let (workspace_uuid, space_id, target_uid_str) = path.into_inner();
+  state
+    .workspace_access_control
+    .enforce_action(&uid, &workspace_uuid, Action::Write)
+    .await?;
+  let target_uid = target_uid_str
+    .parse::<i64>()
+    .map_err(|e| AppError::InvalidParams(format!("Invalid target uid: {}", e)))?;
+  let member = workspace::space::update_space_member(&state, workspace_uuid, space_id, target_uid, payload.into_inner()).await?;
+  Ok(Json(AppResponse::Ok().with_data(member)))
+}
+
+async fn delete_space_member_handler(
+  user_uuid: UserUuid,
+  path: web::Path<(Uuid, Uuid, String)>,
+  state: Data<AppState>,
+) -> Result<Json<AppResponse<()>>> {
+  let uid = state.user_cache.get_user_uid(&user_uuid).await?;
+  let (workspace_uuid, space_id, target_uid_str) = path.into_inner();
+  state
+    .workspace_access_control
+    .enforce_action(&uid, &workspace_uuid, Action::Write)
+    .await?;
+  let target_uid = target_uid_str
+    .parse::<i64>()
+    .map_err(|e| AppError::InvalidParams(format!("Invalid target uid: {}", e)))?;
+  workspace::space::remove_space_member(&state, workspace_uuid, space_id, target_uid).await?;
   Ok(Json(AppResponse::Ok()))
 }
 

@@ -10,6 +10,7 @@ import { PageService, WorkspaceService } from '@/application/services/domains';
 import {
   AccessLevel,
   CreatePagePayload,
+  legacySpacePermission,
   Role,
   SpaceMemberRole,
   SpacePermissionSettings,
@@ -32,6 +33,7 @@ import {
   SELECTABLE_SPACE_VISIBILITIES,
 } from '@/components/app/view-actions/spaceVisibilityOptions';
 import {
+  getStructuredSpacesCapability,
   recordStructuredSpacesUnsupported,
   useStructuredSpacesCapability,
 } from '@/application/services/js-services/http/spaceCapability';
@@ -176,12 +178,6 @@ function CreateSpaceModal({
   const [permissionSettings, setPermissionSettings] = useState<SpacePermissionSettings>(() =>
     defaultSpacePermissionSettings(DEFAULT_SPACE_VISIBILITY)
   );
-
-  useEffect(() => {
-    if (isLegacyServer && permissionSettings.visibility === SpaceVisibility.Custom) {
-      setPermissionSettings(defaultSpacePermissionSettings(SpaceVisibility.Public));
-    }
-  }, [isLegacyServer, permissionSettings.visibility]);
   const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMember[]>([]);
   const [loadedWorkspaceMemberDirectoryId, setLoadedWorkspaceMemberDirectoryId] = useState<string | null>(null);
   const [loadingWorkspaceMembers, setLoadingWorkspaceMembers] = useState(false);
@@ -283,7 +279,7 @@ function CreateSpaceModal({
       );
       const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
 
-      if (failure) throw failure.reason;
+      if (failure && !isUnsupportedRouteError(failure.reason)) throw failure.reason;
     },
     [workspaceId]
   );
@@ -530,12 +526,13 @@ function CreateSpaceModal({
       let committed = committedSpaceRef.current;
 
       if (!committed) {
+        const spaceId = draftSpaceIdRef.current;
         const visibility = permissionSettings.visibility;
         const spacePayload = {
           name: trimmedName,
           space_icon: spaceIcon,
           space_icon_color: spaceIconColor,
-          view_id: draftSpaceIdRef.current,
+          view_id: spaceId,
           client_generated_view_id: true,
           permission: permissionSettingsForCreation(permissionSettings),
         };
@@ -551,20 +548,93 @@ function CreateSpaceModal({
             : [];
         appliedMemberUidsRef.current.clear();
 
-        if (initialPage) {
-          if (!createSpaceWithInitialPage) return;
-          const result = await createSpaceWithInitialPage({
-            ...spacePayload,
-            initial_page: {
-              ...initialPage,
-              view_id: initialPage.view_id ?? draftInitialPageIdRef.current,
-            },
-          });
+        const isLegacy = isLegacyServer || (workspaceId ? getStructuredSpacesCapability(workspaceId) === false : false);
+        const legacyPermissionVal = legacySpacePermission(permissionSettings.visibility);
 
-          committed = { spaceId: result.space.view_id, initialPageId: result.page.view_id };
+        if (isLegacy) {
+          if (initialPage) {
+            if (!createSpaceWithInitialPage) return;
+            const result = await createSpaceWithInitialPage({
+              name: trimmedName,
+              space_icon: spaceIcon,
+              space_icon_color: spaceIconColor,
+              view_id: spaceId,
+              space_permission: legacyPermissionVal,
+              client_generated_view_id: true,
+              initial_page: {
+                ...initialPage,
+                view_id: initialPage.view_id ?? draftInitialPageIdRef.current,
+              },
+            });
+
+            committed = { spaceId: result.space.view_id, initialPageId: result.page.view_id };
+          } else {
+            if (!createSpace) return;
+            committed = {
+              spaceId: await createSpace({
+                name: trimmedName,
+                space_icon: spaceIcon,
+                space_icon_color: spaceIconColor,
+                view_id: spaceId,
+                space_permission: legacyPermissionVal,
+                client_generated_view_id: true,
+              }),
+            };
+          }
         } else {
-          if (!createSpace) return;
-          committed = { spaceId: await createSpace(spacePayload) };
+          try {
+            if (initialPage) {
+              if (!createSpaceWithInitialPage) return;
+              const result = await createSpaceWithInitialPage({
+                ...spacePayload,
+                initial_page: {
+                  ...initialPage,
+                  view_id: initialPage.view_id ?? draftInitialPageIdRef.current,
+                },
+              });
+
+              committed = { spaceId: result.space.view_id, initialPageId: result.page.view_id };
+            } else {
+              if (!createSpace) return;
+              committed = { spaceId: await createSpace(spacePayload) };
+            }
+          } catch (createError) {
+            if (isUnsupportedRouteError(createError)) {
+              if (workspaceId) recordStructuredSpacesUnsupported(workspaceId);
+
+              if (initialPage) {
+                if (!createSpaceWithInitialPage) throw createError;
+                const result = await createSpaceWithInitialPage({
+                  name: trimmedName,
+                  space_icon: spaceIcon,
+                  space_icon_color: spaceIconColor,
+                  view_id: spaceId,
+                  space_permission: legacyPermissionVal,
+                  client_generated_view_id: true,
+                  initial_page: {
+                    ...initialPage,
+                    view_id: initialPage.view_id ?? draftInitialPageIdRef.current,
+                  },
+                });
+
+                committed = { spaceId: result.space.view_id, initialPageId: result.page.view_id };
+              } else {
+                if (!createSpace) throw createError;
+                committed = {
+                  spaceId: await createSpace({
+                    name: trimmedName,
+                    space_icon: spaceIcon,
+                    space_icon_color: spaceIconColor,
+                    view_id: spaceId,
+                    space_permission: legacyPermissionVal,
+                    client_generated_view_id: true,
+                  }),
+                };
+              }
+            } else {
+              throw createError;
+            }
+          }
         }
 
         // Record the committed identity before any queued member POST. A retry
@@ -605,13 +675,7 @@ function CreateSpaceModal({
         }
       }
 
-      if (isUnsupportedRouteError(error)) {
-        if (workspaceId) recordStructuredSpacesUnsupported(workspaceId);
-        notify.error(t('space.structuredSpacesUnsupported'));
-        setPermissionSettings(defaultSpacePermissionSettings(SpaceVisibility.Public));
-      } else {
-        notify.error(getErrorMessage(error));
-      }
+      notify.error(getErrorMessage(error));
     } finally {
       creatingRef.current = false;
       setLoading(false);
@@ -623,12 +687,14 @@ function CreateSpaceModal({
     finishCreation,
     hasAmbiguousCreation,
     initialPage,
+    isLegacyServer,
     permissionSettings,
     selectedMembers,
     spaceIcon,
     spaceIconColor,
     spaceName,
     t,
+    workspaceId,
   ]);
 
   const memberControlsDisabled = loading || Boolean(committedSpace) || hasAmbiguousCreation;
@@ -641,7 +707,7 @@ function CreateSpaceModal({
       modalTestId='create-space-modal'
       activeTab={tab}
       onTabChange={setTab}
-      membersTabVisible={!isLegacyServer}
+      membersTabVisible
       membersTabDisabled={false}
       membersContent={
         <div className='appflowy-scroller max-h-[min(58vh,calc(100vh-220px))] overflow-y-auto py-2 pr-1'>
@@ -717,9 +783,9 @@ function CreateSpaceModal({
       onSpaceNameChange={setSpaceName}
       onSpaceIconChange={handleSpaceIconChange}
       permissionSettings={permissionSettings}
-      visibilityOptions={isLegacyServer ? LEGACY_SPACE_VISIBILITIES : SELECTABLE_SPACE_VISIBILITIES}
+      visibilityOptions={SELECTABLE_SPACE_VISIBILITIES}
       permissionSettingsDisabled={memberControlsDisabled}
-      showAccessDetails={isLegacyServer ? (permissionSettings.visibility === SpaceVisibility.Private) : true}
+      showAccessDetails
       workspaceName={workspaceName}
       privateOwner={privateOwner}
       onVisibilitySelect={handleVisibilitySelect}

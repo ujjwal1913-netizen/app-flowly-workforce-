@@ -1,8 +1,8 @@
 use app_error::AppError;
 use chrono::{DateTime, Utc};
 use collab_entity::{CollabType, EncodedCollab};
-use database_entity::dto::{AFRole, AFWebUser, AFWorkspaceInvitationStatus, PublishInfo};
-use serde::{Deserialize, Serialize};
+use database_entity::dto::{AFAccessLevel, AFRole, AFWebUser, AFWorkspaceInvitationStatus, PublishInfo};
+use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::{collections::HashMap, ops::Deref};
@@ -554,3 +554,150 @@ pub struct UpsertDatatabaseRow {
   pub cells: HashMap<String, serde_json::Value>,
   pub document: Option<String>,
 }
+
+pub fn deserialize_uid_flexible<'de, D>(deserializer: D) -> Result<i64, D::Error>
+where
+  D: Deserializer<'de>,
+{
+  struct UidVisitor;
+  impl<'de> de::Visitor<'de> for UidVisitor {
+    type Value = i64;
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+      formatter.write_str("an integer or string representing an i64 UID")
+    }
+    fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E> {
+      Ok(v)
+    }
+    fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E> {
+      Ok(v as i64)
+    }
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+      E: de::Error,
+    {
+      v.parse::<i64>().map_err(de::Error::custom)
+    }
+  }
+  deserializer.deserialize_any(UidVisitor)
+}
+
+pub fn serialize_uid_as_string<S>(uid: &i64, serializer: S) -> Result<S::Ok, S::Error>
+where
+  S: Serializer,
+{
+  serializer.serialize_str(&uid.to_string())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SpaceSecuritySettingsDto {
+  #[serde(default)]
+  pub disable_guests: bool,
+  #[serde(default)]
+  pub disable_public_links: bool,
+  #[serde(default)]
+  pub disable_export: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpacePermissionSettingsDto {
+  pub visibility: String, // "public" | "private" | "custom"
+  pub owner_access_level: AFAccessLevel,
+  #[serde(default)]
+  pub member_default_access_level: Option<AFAccessLevel>,
+  #[serde(default)]
+  pub everyone_else_access_level: Option<AFAccessLevel>,
+  #[serde(default = "default_space_policy")]
+  pub invite_policy: String,
+  #[serde(default = "default_space_policy")]
+  pub sidebar_edit_policy: String,
+  #[serde(default)]
+  pub invite_link_enabled: bool,
+  #[serde(default)]
+  pub security: Option<SpaceSecuritySettingsDto>,
+}
+
+fn default_space_policy() -> String {
+  "members_and_owners".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateStructuredSpaceParams {
+  pub name: String,
+  #[serde(default)]
+  pub space_icon: String,
+  #[serde(default)]
+  pub space_icon_color: String,
+  pub view_id: Option<Uuid>,
+  #[serde(default)]
+  pub permission: Option<SpacePermissionSettingsDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateStructuredSpaceParams {
+  pub name: Option<String>,
+  pub space_icon: Option<String>,
+  pub space_icon_color: Option<String>,
+  pub permission: Option<SpacePermissionSettingsDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpacePermissionResponseDto {
+  pub space_id: Uuid,
+  pub permission: SpacePermissionSettingsDto,
+  pub current_user_access_level: Option<AFAccessLevel>,
+  pub can_manage_space: bool,
+  pub can_manage_members: bool,
+  pub can_invite_members: bool,
+  pub can_edit_sidebar: bool,
+  pub explicit_member_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpaceListItemDto {
+  pub space_id: Uuid,
+  pub name: String,
+  pub permission: SpacePermissionSettingsDto,
+  pub current_user_access_level: Option<AFAccessLevel>,
+  pub explicit_member_count: i64,
+  pub is_explicit_member: bool,
+  pub can_leave: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpacesResponseDto {
+  pub spaces: Vec<SpaceListItemDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpaceMemberDto {
+  #[serde(serialize_with = "serialize_uid_as_string")]
+  pub uid: i64,
+  pub email: Option<String>,
+  pub name: Option<String>,
+  pub role: String,
+  pub access_level: AFAccessLevel,
+  pub source: String,
+  pub workspace_role: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpaceMembersResponseDto {
+  pub members: Vec<SpaceMemberDto>,
+  #[serde(default)]
+  pub groups: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AddSpaceMemberParams {
+  #[serde(deserialize_with = "deserialize_uid_flexible")]
+  pub uid: i64,
+  pub role: String,
+  pub access_level: AFAccessLevel,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateSpaceMemberParams {
+  pub role: Option<String>,
+  pub access_level: Option<AFAccessLevel>,
+}
+

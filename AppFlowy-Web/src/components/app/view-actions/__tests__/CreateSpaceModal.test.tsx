@@ -5,6 +5,7 @@ import {
   Role,
   SpaceInvitePolicy,
   SpaceMemberRole,
+  SpacePermission,
   SpacePermissionSettings,
   SpaceSidebarEditPolicy,
   SpaceVisibility,
@@ -955,33 +956,65 @@ describe('CreateSpaceModal draft controller', () => {
   });
 
   describe('legacy server compatibility', () => {
-    it('restricts visibility options to Public and Private and hides Custom on legacy servers', async () => {
+    it('keeps Public, Private, and Custom visibility options and Members tab visible on legacy servers', () => {
       recordStructuredSpacesUnsupported('workspace-1');
       render(<CreateSpaceModal open onClose={jest.fn()} />);
 
       expect(screen.getByTestId('manage-space-visibility-option-public')).toBeTruthy();
       expect(screen.getByTestId('manage-space-visibility-option-private')).toBeTruthy();
-      expect(screen.queryByTestId('manage-space-visibility-option-custom')).toBeNull();
-      expect(screen.queryByRole('tab', { name: 'space.permissionManager.membersTab' })).toBeNull();
+      expect(screen.getByTestId('manage-space-visibility-option-custom')).toBeTruthy();
+      expect(screen.getByRole('tab', { name: 'space.permissionManager.membersTab' })).toBeTruthy();
     });
 
-    it('shields 404 route errors on space creation and displays a friendly error notification', async () => {
+    it('gracefully falls back to legacy creation when structured creation returns 404', async () => {
+      const onCreated = jest.fn();
       const unsupportedError = {
         isAxiosError: true,
         response: { status: 404, data: { message: 'Route not found' } },
         message: 'Request failed with status code 404',
       };
-      mockCreateSpace.mockRejectedValueOnce(unsupportedError);
+      // First structured call fails with 404, fallback legacy call succeeds
+      mockCreateSpace.mockRejectedValueOnce(unsupportedError).mockResolvedValueOnce('space-id');
 
-      render(<CreateSpaceModal open onClose={jest.fn()} />);
+      render(<CreateSpaceModal open onClose={jest.fn()} onCreated={onCreated} />);
 
       enterSpaceName('New Project');
       fireEvent.click(screen.getByTestId('create-space-submit'));
 
       await waitFor(() => {
-        expect(notify.error).toHaveBeenCalledWith('space.structuredSpacesUnsupported');
+        expect(onCreated).toHaveBeenCalledWith('space-id', undefined);
       });
-      expect(notify.error).not.toHaveBeenCalledWith('Request failed with status code 404');
+      expect(notify.error).not.toHaveBeenCalled();
+      expect(mockCreateSpace).toHaveBeenCalledTimes(2);
+      expect(mockCreateSpace).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          name: 'New Project',
+          space_permission: SpacePermission.Public,
+        })
+      );
+    });
+
+    it('directly uses legacy creation when server capability is already known to be legacy', async () => {
+      const onCreated = jest.fn();
+      recordStructuredSpacesUnsupported('workspace-1');
+
+      render(<CreateSpaceModal open onClose={jest.fn()} onCreated={onCreated} />);
+
+      enterSpaceName('Custom Legacy Space');
+      fireEvent.click(visibilityOption(SpaceVisibility.Custom));
+      fireEvent.click(screen.getByTestId('create-space-submit'));
+
+      await waitFor(() => {
+        expect(onCreated).toHaveBeenCalledWith('space-id', undefined);
+      });
+      expect(mockCreateSpace).toHaveBeenCalledTimes(1);
+      expect(mockCreateSpace).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'Custom Legacy Space',
+          space_permission: SpacePermission.Public,
+        })
+      );
     });
   });
 });

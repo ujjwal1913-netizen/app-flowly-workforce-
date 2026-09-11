@@ -1503,6 +1503,14 @@ pub async fn delete_trash(
     update,
   )
   .await?;
+
+  if let Ok(space_uuid) = Uuid::parse_str(view_id) {
+    let _ = sqlx::query("DELETE FROM af_space_permission WHERE space_id = $1")
+      .bind(space_uuid)
+      .execute(&state.pg_pool)
+      .await;
+  }
+
   Ok(())
 }
 
