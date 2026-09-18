@@ -5,7 +5,7 @@ use anyhow::{anyhow, Context};
 use async_openai::config::{AzureConfig, OpenAIConfig};
 use indexer::vector::embedder::get_open_ai_config;
 use infra::env_util::{get_env_var, get_env_var_opt};
-use mailer::config::MailerSetting;
+use mailer::config::{BrevoSetting, MailerSetting};
 use secrecy::{ExposeSecret, Secret};
 use semver::Version;
 use serde::Deserialize;
@@ -31,6 +31,7 @@ pub struct Config {
   pub notification: NotificationSetting,
   pub open_ai_config: Option<OpenAIConfig>,
   pub azure_ai_config: Option<AzureConfig>,
+  pub brevo: Option<BrevoSetting>,
 }
 
 #[derive(serde::Deserialize, Clone, Debug)]
@@ -289,6 +290,11 @@ pub fn get_configuration() -> Result<Config, anyhow::Error> {
     },
     open_ai_config,
     azure_ai_config,
+    brevo: get_env_var_opt("BREVO_API_KEY").map(|api_key| BrevoSetting {
+      api_key: api_key.into(),
+      from_email: get_env_var("EMAIL_FROM", "info@carcall.in"),
+      from_name: get_env_var("EMAIL_FROM_NAME", "Workforce OS"),
+    }),
   };
   Ok(config)
 }

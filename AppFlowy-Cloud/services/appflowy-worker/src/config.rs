@@ -1,6 +1,6 @@
 use anyhow::{Context, Error};
-use infra::env_util::get_env_var;
-use mailer::config::MailerSetting;
+use infra::env_util::{get_env_var, get_env_var_opt};
+use mailer::config::{BrevoSetting, MailerSetting};
 use secrecy::Secret;
 use serde::Deserialize;
 use sqlx::postgres::{PgConnectOptions, PgSslMode};
@@ -13,6 +13,7 @@ pub struct Config {
   pub db_settings: DatabaseSetting,
   pub s3_setting: S3Setting,
   pub mailer: MailerSetting,
+  pub brevo: Option<BrevoSetting>,
 }
 
 impl Config {
@@ -58,6 +59,11 @@ impl Config {
         smtp_password: get_env_var("APPFLOWY_MAILER_SMTP_PASSWORD", "password").into(),
         smtp_tls_kind: get_env_var("APPFLOWY_MAILER_SMTP_TLS_KIND", "wrapper"),
       },
+      brevo: get_env_var_opt("BREVO_API_KEY").map(|api_key| BrevoSetting {
+        api_key: api_key.into(),
+        from_email: get_env_var("EMAIL_FROM", "info@carcall.in"),
+        from_name: get_env_var("EMAIL_FROM_NAME", "Workforce OS"),
+      }),
     })
   }
 }

@@ -64,6 +64,7 @@ mod tests {
       "localhost",
       465,
       "none",
+      None,
     )
     .await
     .unwrap();

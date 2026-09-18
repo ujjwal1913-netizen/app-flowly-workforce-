@@ -9,3 +9,10 @@ pub struct MailerSetting {
   pub smtp_password: Secret<String>,
   pub smtp_tls_kind: String,
 }
+
+#[derive(Clone, Debug)]
+pub struct BrevoSetting {
+  pub api_key: secrecy::Secret<String>,
+  pub from_email: String,
+  pub from_name: String,
+}

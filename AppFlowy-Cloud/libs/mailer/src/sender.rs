@@ -8,12 +8,16 @@ use lettre::Address;
 use lettre::AsyncSmtpTransport;
 use lettre::AsyncTransport;
 use secrecy::ExposeSecret;
+use crate::config::BrevoSetting;
+use std::time::Duration;
 
 #[derive(Clone)]
 pub struct Mailer {
   smtp_transport: AsyncSmtpTransport<lettre::Tokio1Executor>,
   smtp_email: String,
   handlers: Handlebars<'static>,
+  brevo: Option<BrevoSetting>,
+  http_client: reqwest::Client,
 }
 impl Mailer {
   pub async fn new(
@@ -23,6 +27,7 @@ impl Mailer {
     smtp_host: &str,
     smtp_port: u16,
     smtp_tls_kind: &str,
+    brevo: Option<BrevoSetting>,
   ) -> Result<Self, anyhow::Error> {
     let creds = Credentials::new(smtp_username, smtp_password.expose_secret().to_string());
     let tls: Tls = match smtp_tls_kind {
@@ -39,10 +44,16 @@ impl Mailer {
       .port(smtp_port)
       .build();
     let handlers = Handlebars::new();
+    let http_client = reqwest::Client::builder()
+      .timeout(Duration::from_secs(10))
+      .build()?;
+
     Ok(Self {
       smtp_transport,
       smtp_email,
       handlers,
+      brevo,
+      http_client,
     })
   }
 
@@ -75,6 +86,42 @@ impl Mailer {
     T: serde::Serialize,
   {
     let rendered = self.handlers.render(template_name, &param)?;
+
+    // Use Brevo REST API if configured
+    if let Some(brevo) = &self.brevo {
+      let mut to_obj = serde_json::Map::new();
+      to_obj.insert("email".to_string(), serde_json::Value::String(email.to_string()));
+      if let Some(name) = recipient_name.clone() {
+        to_obj.insert("name".to_string(), serde_json::Value::String(name));
+      }
+
+      let mut sender_obj = serde_json::Map::new();
+      sender_obj.insert("email".to_string(), serde_json::Value::String(brevo.from_email.clone()));
+      sender_obj.insert("name".to_string(), serde_json::Value::String(brevo.from_name.clone()));
+
+      let payload = serde_json::json!({
+        "sender": sender_obj,
+        "to": [to_obj],
+        "subject": subject,
+        "htmlContent": rendered,
+      });
+
+      let resp = self.http_client.post("https://api.brevo.com/v3/smtp/email")
+        .header("api-key", brevo.api_key.expose_secret())
+        .json(&payload)
+        .send()
+        .await?;
+
+      if resp.status().is_success() {
+        tracing::info!("Brevo REST API: email sent to {}", email);
+        return Ok(());
+      } else {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(anyhow::anyhow!("Brevo API error {}: {}", status, text));
+      }
+    }
+
     let email = Message::builder()
       .from(lettre::message::Mailbox::new(
         Some("AppFlowy Notification".to_string()),

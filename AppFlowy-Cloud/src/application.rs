@@ -29,7 +29,7 @@ use aws_sdk_s3::operation::create_bucket::CreateBucketError;
 use aws_sdk_s3::types::{
   BucketInfo, BucketLocationConstraint, BucketType, CreateBucketConfiguration,
 };
-use mailer::config::MailerSetting;
+use mailer::config::{BrevoSetting, MailerSetting};
 use secrecy::ExposeSecret;
 use sqlx::{postgres::PgPoolOptions, PgPool};
 use tokio::sync::RwLock;
@@ -331,7 +331,7 @@ pub async fn init_state(config: &Config) -> Result<AppState, Error> {
     workspace_access_control.clone(),
   ));
 
-  let mailer = get_mailer(&config.mailer).await?;
+  let mailer = get_mailer(&config.mailer, config.brevo.clone()).await?;
   if config.notification.enable_email_notification {
     info!("Setting up background notification worker...");
     let email_notification_interval = config.notification.email_notification_interval_secs;
@@ -537,7 +537,7 @@ async fn create_bucket_if_not_exists(
   }
 }
 
-async fn get_mailer(mailer: &MailerSetting) -> Result<AFCloudMailer, Error> {
+async fn get_mailer(mailer: &MailerSetting, brevo: Option<BrevoSetting>) -> Result<AFCloudMailer, Error> {
   info!("Connecting to mailer with setting: {:?}", mailer);
   let mailer = Mailer::new(
     mailer.smtp_username.clone(),
@@ -546,6 +546,7 @@ async fn get_mailer(mailer: &MailerSetting) -> Result<AFCloudMailer, Error> {
     &mailer.smtp_host,
     mailer.smtp_port,
     mailer.smtp_tls_kind.as_str(),
+    brevo,
   )
   .await?;
 
